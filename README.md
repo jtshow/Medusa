@@ -26,12 +26,12 @@ Medusa reads your `SKILL.md` files and acts like a **technical auditor**:
 
 ### Windows (Native)
 ```powershell
-irm https://raw.githubusercontent.com/your-repo/medusa/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/thejtshow/medusa/main/install.ps1 | iex
 ```
 
 ### macOS / Linux
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-repo/medusa/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/thejtshow/medusa/main/install.sh | bash
 ```
 
 ### Build from Source (Any Platform)
@@ -58,11 +58,10 @@ cargo build --release
 ### Scan Skills (JSON Output)
 ```bash
 # Windows
-& "C:\Project\medusa-github\target\release\medusa" scan "C:\Project\.opencode\skills"
+& "C:\pathtoskills
 
 # macOS/Linux
-./target/release/medusa scan ~/.hermes/skills
-```
+/path/to/skills```
 
 ### Audit a Skill (See WHY it's at its tier)
 ```bash
@@ -120,7 +119,7 @@ Medusa outputs **pure JSON** - perfect for any agent:
 
 ### Example (PowerShell Agent)
 ```powershell
-& "C:\Project\medusa-github\target\release\medusa" scan "C:\Project\.opencode\skills"
+& "C:\pathtoskillsfolder"
 ```
 
 ## Performance.
@@ -168,13 +167,6 @@ medusa-github/
 └── AGENT_INTEGRATION.md  # Agent hook guide
 ```
 
-## Push to GitHub.
-
-```bash
-cd C:\Project\medusa-github
-git remote add origin https://github.com/YOUR-USERNAME/medusa.git
-git push -u origin master
-```
 
 ---
 
