@@ -26,18 +26,18 @@ Medusa reads your `SKILL.md` files and acts like a **technical auditor**:
 
 ### Windows (Native)
 ```powershell
-irm https://raw.githubusercontent.com/thejtshow/medusa/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/jtshow/medusa/main/install.ps1 | iex
 ```
 
 ### macOS / Linux
 ```bash
-curl -sSL https://raw.githubusercontent.com/thejtshow/medusa/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/jtshow/medusa/main/install.sh | bash
 ```
 
 ### Build from Source (Any Platform)
 ```bash
 # Install Rust: https://rustup.rs
-git clone https://github.com/thejtshow/medusa.git
+git clone https://github.com/jtshow/medusa.git
 cd medusa
 cargo build --release
 ```
