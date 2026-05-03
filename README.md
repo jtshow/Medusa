@@ -57,15 +57,11 @@ cargo build --release
 
 ### Scan Skills (JSON Output)
 ```bash
-# Windows
-& "C:\pathtoskills
-
-# macOS/Linux
-/path/to/skills```
+medusa scan /pathofyourskills
 
 ### Audit a Skill (See WHY it's at its tier)
 ```bash
-medusa audit /path/to/skills/ai-ml
+medusa audit /path/to/skills/
 ```
 
 **Example Output:**
