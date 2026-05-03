@@ -1,17 +1,32 @@
-# Medusa Skill Framework (MSF) v0.6.0
+# Medusa Skill Framework (MSF) v0.6.0.
 
-Ultra-fast skill scanner with **audit-based ranking**, automatic promotion, and 9-tier leveling system.
+**The world's first audit-based skill ranking system.** Medusa scans your SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
 
-## ⚡ One-Line Install
+## What It Does.
 
-### Windows (PowerShell)
+Medusa reads your `SKILL.md` files and acts like a **technical auditor**:
+
+1. **Measures** complexity (content length, code blocks, step-by-step instructions, technical terms)
+2. **Calculates** objective experience score (60% complexity + 30% value + 10% keywords)
+3. **Assigns** tier automatically (Godlike → Unique → Legendary → Mythic → Epic → Ultra Rare → Rare → Uncommon → Common → Poor)
+4. **Promotes** as you improve (edit SKILL.md, next scan updates rank!)
+
+### Pizza Example 🍕.
+
+| Skill State | Content | Metrics | Tier |
+|-------------|---------|---------|------|
+| "I cook pizza" (200 chars) | 0 code, 0 steps | Complexity: 15/100 | **Poor** |
+| "5 varieties" (800 chars, 5 steps) | 3 code blocks | Complexity: 35/100 | **Common** |
+| "15 varieties + techniques" (3000 chars, 15 steps) | 12 tech terms | Complexity: 65/100 | **Ultra Rare** |
+| "20+ varieties, ingredients, methods" (6000+ chars, 25+ terms) | 10+ code blocks | Complexity: 85+/100 | **Godlike** 🟣 |
+
+**As you improve your skills, Medusa automatically promotes them!**
+
+## ⚡ One-Line Install.
+
+### Windows (Native)
 ```powershell
 irm https://raw.githubusercontent.com/your-repo/medusa/main/install.ps1 | iex
-```
-
-### Windows (Command Prompt)
-```batch
-curl -SL https://raw.githubusercontent.com/your-repo/medusa/main/install.bat -o install.bat && install.bat
 ```
 
 ### macOS / Linux
@@ -20,280 +35,37 @@ curl -sSL https://raw.githubusercontent.com/your-repo/medusa/main/install.sh | b
 ```
 
 ### Build from Source (Any Platform)
-
-**Step 1: Install Rust**
-- Windows: `irm https://win.rustup.rs/x86_64 | iex` (or download from https://rustup.rs)
-- macOS/Linux: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-
-**Step 2: Clone & Build**
 ```bash
-# All platforms (Windows CMD/PowerShell, macOS, Linux):
+# Install Rust: https://rustup.rs
 git clone https://github.com/your-repo/medusa.git
 cd medusa
 cargo build --release
 ```
 
-**Binary Location:**
-| Platform | Binary Path |
-|----------|--------------|
-| **Windows** | `target\release\medusa.exe` |
-| **macOS/Linux** | `target/release/medusa` |
+## Features.
 
-**Step 3: Run**
-```bash
-# Windows (CMD)
-.\target\release\medusa.exe --help
+| Feature | Description |
+|---------|-------------|
+| **9-Tier Leveling** | Godlike → Poor (based on actual complexity) |
+| **Audit-Based Ranking** | Measures: length, code, steps, tech terms |
+| **Automatic Promotion** | Skills rank up as YOU improve them |
+| **Parallel Scanning** | Rayon-powered (46% faster, A/B tested) |
+| **Fusion Detection** | Finds similar skills (name + content) |
+| **HTML Visualization** | Dark-themed reports with progress bars |
 
-# Windows (PowerShell)
-.\target\release\medusa.exe --help
-
-# macOS/Linux
-./target/release/medusa --help
-```
-
-| Feature | Description | Performance |
-|---------|-------------|-------------|
-| **Audit-Based Ranking** | Measures complexity, value, technical depth | 9-tier system |
-| **Automatic Promotion** | Skills rank up as they improve | No manual needed |
-| **Parallel Scanning** | Rayon-powered concurrent processing | 46% faster (A/B tested) |
-| **Fusion Detection** | Finds similar skills (name + content) | FxHash-powered |
-| **HTML Visualization** | Dark-themed reports with progress bars | Interactive |
-| **A/B Test Framework** | Validate performance claims scientifically | Statistical rigor |
-
-## Usage
+## Quick Start.
 
 ### Scan Skills (JSON Output)
-
-```bash
-# Windows (CMD)
-.\target\release\medusa.exe scan C:\path\to\skills
-
-# Windows (PowerShell)
-.\target\release\medusa.exe scan C:\path\to\skills
-
-# macOS/Linux
-./target/release/medusa scan /path/to/skills
-```
-
-### Audit a Skill (See WHY it's at its tier)
-
 ```bash
 # Windows
-.\target\release\medusa.exe audit C:\path\to\skills
-
-# macOS/Linux
-./target/release/medusa audit /path/to/skills
-```
-
-**Example Output:**
-```
-=== Medusa Skill Audit Report ===
-
-Skill: ai-ml (ai-ml), level: Godlike
-  Experience: 100.0/100
-  Confidence: 75%
-  Metrics:
-    - Content Length: 5966 chars
-    - Code Blocks: 15
-    - Step Instructions: 0
-    - Technical Terms: 26
-    - Complexity Score: 80.0/100
-    - Value Score: 90.0/100
-```
-
-### Generate HTML Report
-
-```bash
-# Windows (CMD)
-.\target\release\medusa.exe html C:\path\to\skills C:\path\to\report.html
-
-# Windows (PowerShell)
-.\target\release\medusa.exe html C:\path\to\skills C:\path\to\report.html
-
-# macOS/Linux
-./target/release/medusa html /path/to/skills /path/to/report.html
-```
-
-Opens a beautiful dark-themed visualization with:
-- Skill bars showing experience levels
-- Color-coded tiers (Godlike = Purple gradient, Unique = Orange gradient, etc.)
-- Detailed metrics for each skill
-- Fusion detection (similar skills)
-
-### Run A/B Test (Validate Performance)
-
-```bash
-# Windows (CMD)
-.\target\release\medusa.exe ab-test C:\path\to\skills --iterations 20
-
-# Windows (PowerShell)
-.\target\release\medusa.exe ab-test C:\path\to\skills --iterations 20
-
-# macOS/Linux
-./target/release/medusa ab-test /path/to/skills --iterations 20
-```
-
-**Example Output:**
-```
-Running A/B Test: Parallel vs Sequential Scan
-Path: /path/to/skills
-Iterations: 20
-
-Hypothesis: Parallel scanning is faster than sequential
-Primary metric: scan_time_ms
-
-Iteration 1: Parallel=178ms, Sequential=362ms
-Iteration 2: Parallel=187ms, Sequential=325ms
-...
-Iteration 20: Parallel=204ms, Sequential=391ms
-
-=== A/B Test Results ===
-Parallel avg: 190.00ms
-Sequential avg: 352.00ms
-✅ Parallel is 46.0% faster
-```
-
-## 9-Tier Leveling System
-
-| Tier | Range | Color | Background |
-|------|--------|--------|-------------|
-| **Godlike** | 95+ | 🟣 Purple | Gradient |
-| **Unique** | 90+ | 🟠 Orange | Gradient |
-| **Legendary** | 85+ | 🟠 Orange-Red | Gradient |
-| **Mythic** | 80+ | 🟣 Pink | Gradient |
-| **Epic** | 75+ | 🟣 Purple | Solid |
-| **Ultra Rare** | 65+ | 🩷 Pink | Solid |
-| **Rare** | 55+ | 🟠 Orange | Solid |
-| **Uncommon** | 45+ | 🔵 Blue | Solid |
-| **Common** | 25+ | 🟢 Green | Solid |
-| **Poor** | <25 | ⚪ Gray | Solid |
-
-## Commands
-
-```bash
-medusa --help
-```
-
-Output:
-```
-Medusa Skill Framework (MSF) v0.6.0 - Audit-Based Ranking
-Usage: medusa <command> [options]
-
-Commands:
-  scan <path>              Scan skills with audit-based ranking
-    --sequential           Use sequential scanning (no Rayon)
-
-  html <path> <output>   Generate HTML visualization
-    --sequential           Use sequential scanning
-
-  ab-test <path>          Run A/B test (parallel vs sequential)
-    --iterations N         Number of test iterations (default: 10)
-
-  audit <path>            Show detailed skill audit report
-
-Options:
-  --help, -h              Show this help message
-  --version, -v           Show version
-```
-
-## How It Works
-
-```
-SKILL.md files
-    ↓
-[WalkDir] Scan filesystem (max depth 4)
-    ↓
-[Rayon] Parallel processing (46% faster, optional)
-    ↓
-[Regex] Extract YAML frontmatter
-    ↓
-[Audit] Measure complexity (length, code, steps, terms)
-    ↓
-[Score] Calculate experience (60% complexity + 30% value)
-    ↓
-[Rank] Assign tier (Godlike → Poor)
-    ↓
-[Fusion] Detect similar skills (FxHash)
-    ↓
-[Output] JSON / HTML visualization
-```
-
-## Cross-Platform Support ✅
-
-| Platform | Binary | Build Command |
-|----------|--------|---------------|
-| **Windows** | `medusa.exe` | `cargo build --release` |
-| **macOS (Intel)** | `medusa` | `cargo build --release` |
-| **macOS (Apple Silicon)** | `medusa` | `cargo build --release` |
-| **Linux (x86_64)** | `medusa` | `cargo build --release` |
-| **Linux (ARM64)** | `medusa` | `cargo build --release` |
-
-**No WSL required!** Runs natively on all platforms.
-
-```
-medusa/
-├── src/
-│   └── main.rs          # Main source (500+ lines)
-├── target/
-│   └── release/
-│       └── medusa       # Compiled binary
-├── Cargo.toml          # Dependencies (minimal: 7 deps)
-├── README.md           # This file
-└── .medusa_state.json  # Promotion state (auto-created)
-```
-
-## Dependencies (Minimal)
-
-```
-serde = "1.0"        # Struct serialization
-serde_json = "1.0"    # JSON output
-walkdir = "2.5"       # Directory traversal
-rayon = "1.10"        # Parallel processing
-regex = "1.10"        # Pattern extraction
-lazy_static = "1.4"   # Regex compilation
-```
-
-## Examples
-
-### Example 1: Scan Your Skills
-
-```bash
-# Windows
-.\target\release\medusa.exe scan C:\Project\.opencode\skills
+& "C:\Project\medusa-github\target\release\medusa" scan "C:\Project\.opencode\skills"
 
 # macOS/Linux
 ./target/release/medusa scan ~/.hermes/skills
 ```
 
-### Example 2: Audit a Specific Skill
-
+### Audit a Skill (See WHY it's at its tier)
 ```bash
-# Windows
-.\target\release\medusa.exe audit C:\Project\.opencode\skills\ai-ml
-
-# macOS/Linux
-./target/release/medusa audit ~/.hermes/skills/ai-ml
-```
-
-Shows detailed breakdown:
-- Why it's ranked "Godlike"
-- Content length, code blocks, step count
-- Technical term density
-- Complexity and value scores
-
-### Example 3: Generate Beautiful Report
-
-```bash
-# Windows
-.\target\release\medusa.exe html C:\Project\.opencode\skills C:\Project\medusa\report.html
-
-# macOS/Linux
-./target/release/medusa html ~/.hermes/skills ~/report.html
-```
-
-### Example 2: Audit a Specific Skill
-```bash
-# Shows WHY it's at its tier
 medusa audit /path/to/skills/ai-ml
 ```
 
@@ -313,83 +85,98 @@ Skill: ai-ml (ai-ml), level: Godlike
     - Value Score: 90.0/100
 ```
 
-### Example 3: Generate Beautiful Report
+### Generate HTML Report
 ```bash
-# Windows
-.\target\release\medusa.exe html C:\path\to\skills report.html
-
-# Mac/Linux
-./target/release/medusa html /path/to/skills report.html
+medusa html /path/to/skills report.html
+```
+Opens beautiful dark-themed visualization with color-coded tiers!
 ```
 
-Opens in browser with:
-- Dark theme (hacker style)
-- Color-coded skill cards
-- Experience progress bars
-- Fusion detection section
+## 9-Tier Leveling System.
 
-## Performance
+| Tier | Range | Color |
+|------|--------|--------|
+| **Godlike** | 95+ | 🟣 Purple gradient |
+| **Unique** | 90+ | 🟠 Orange gradient |
+| **Legendary** | 85+ | 🟠 Orange-red gradient |
+| **Mythic** | 80+ | 🟣 Pink gradient |
+| **Epic** | 75+ | 🟣 Purple solid |
+| **Ultra Rare** | 65+ | 🩷 Pink solid |
+| **Rare** | 55+ | 🟠 Orange solid |
+| **Uncommon** | 45+ | 🔵 Blue solid |
+| **Common** | 25+ | 🟢 Green solid |
+| **Poor** | <25 | ⚪ Gray solid |
+
+## Agent Integration ✅.
+
+Medusa outputs **pure JSON** - perfect for any agent:
+
+| Agent | Integration |
+|-------|-------------|
+| **Hermes** | Add as tool in `.hermes/config.yaml` |
+| **OpenClaw** | Call via Python `subprocess` |
+| **ClaudeCode/Codex** | Shell out: `medusa scan <path>` |
+| **Any Agent** | Can run shell commands + parse JSON ✅ |
+
+### Example (PowerShell Agent)
+```powershell
+& "C:\Project\medusa-github\target\release\medusa" scan "C:\Project\.opencode\skills"
+```
+
+## Performance.
 
 **A/B Test Results** (36 skills, 20 iterations):
-- **Parallel** (Rayon): 190ms average
-- **Sequential**: 352ms average
-- **Speedup**: 46% faster
+- **Parallel** (Rayon): 190ms avg
+- **Sequential**: 352ms avg
+- **Speedup**: 46% faster ✅
 
-**Scalability**:
-- 36 skills scanned in ~150ms
-- Linear scaling with Rayon parallelization
-- Memory-efficient (no unnecessary copies)
+## Cross-Platform ✅.
 
-## Quick Test (Verify Installation)
+| Platform | Binary | Build Command |
+|----------|--------|---------------|
+| **Windows** | `medusa` (no .exe!) | `cargo build --release` |
+| **macOS (Intel)** | `medusa` | `cargo build --release` |
+| **macOS (Apple)** | `medusa` | `cargo build --release` |
+| **Linux (x86_64)** | `medusa` | `cargo build --release` |
 
-After installation, verify it works:
+**No WSL needed!** Runs natively on all platforms.
 
-```bash
-# Windows (CMD)
-.\target\release\medusa.exe --version
+## Why "Audit-Based"?
 
-# Windows (PowerShell)
-.\target\release\medusa.exe --version
-
-# macOS/Linux
-./target/release/medusa --version
-```
-
-**Expected output:**
-```
-Medusa Skill Framework (MSF) v0.6.0
-```
-
-### Test Scan
-```bash
-# Windows: medusa scan C:\Project\.opencode\skills
-
-# macOS/Linux:
-./target/release/medusa scan ~/.hermes/skills
-```
-
-Should output JSON with skills audit.
-
-Traditional skill systems use **static rankings** (you manually set the level).
+Traditional systems use **static rankings** (you manually set levels).
 
 Medusa uses **audit-based ranking**:
 1. **Measures** actual skill complexity (content, code, steps, terms)
-2. **Calculates** objective experience score (60% complexity + 30% value)
-3. **Assigns** tier automatically (Godlike → Poor)
-4. **Promotes** as you improve (just edit SKILL.md, next scan updates!)
+2. **Calculates** objective experience score
+3. **Assigns** tier automatically
+4. **Promotes** as you improve - **no manual commands needed!**
 
-**No manual promotion commands needed!**
+## File Structure.
 
+```
+medusa-github/
+├── src/main.rs          # Core (v0.6.0)
+├── target/release/
+│   └── medusa          # Binary (NO .exe extension!)
+├── Cargo.toml          # 7 minimal deps
+├── README.md           # This file
+├── LICENSE             # GNU GPLv3
+├── build.sh            # Linux/macOS build
+├── build.bat           # Windows build
+├── install.sh          # One-line installer
+├── install.ps1         # PowerShell installer
+└── AGENT_INTEGRATION.md  # Agent hook guide
+```
 
-## Version History
+## Push to GitHub.
 
-- **v0.6.0** (Current): 9-tier leveling system (Godlike → Poor)
-- **v0.5.0**: Rank promotion system
-- **v0.4.0**: CLI improvements, A/B test framework
-- **v0.3.0**: Fusion detection, HTML visualization
-- **v0.2.0**: Parallel scanning with Rayon
-- **v0.1.0**: Initial release
+```bash
+cd C:\Project\medusa-github
+git remote add origin https://github.com/YOUR-USERNAME/medusa.git
+git push -u origin master
+```
 
 ---
 
-**Built with Rust 🦀 + Rayon ⚡ + Regex 🔍**
+**Built with Rust 🦀 + Rayon ⚡ + Regex 🔍**  
+**Cross-platform**: Windows 🪟 | macOS 🍎 | Linux 🐧**
