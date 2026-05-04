@@ -1,4 +1,6 @@
-# Medusa Skill Framework (MSF) v0.11.
+# Medusa Skill Framework (MSF) v0.11
+
+![Alt text](https://i.ibb.co/twSdwzHZ/medusa.jpg)
 
 **The world's first audit-based skill ranking system.** Medusa scans your SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
 
@@ -58,14 +60,14 @@ cargo build --release
 ### Scan Skills (JSON Output)
 ```bash
 # Windows
-& "C:\pathtoskills
+medusa scan "C:\pathtoskills
 
 # macOS/Linux
-/path/to/skills```
+medusa scan /path/to/skills```
 
 ### Audit a Skill (See WHY it's at its tier)
 ```bash
-medusa audit /path/to/skills/ai-ml
+medusa audit /path/to/skills/
 ```
 
 **Example Output:**
