@@ -1,0 +1,20 @@
+# Medusa Configuration File
+# Customize scoring weights (must sum to 1.0)
+
+[scoring]
+complexity_weight = 0.6  # Weight for complexity score (default: 0.6)
+value_weight = 0.3          # Weight for value score (default: 0.3)
+keyword_weight = 0.1        # Weight for keyword bonuses (default: 0.1)
+
+# Custom tier thresholds (optional - uses defaults if not specified)
+[tier_thresholds]
+# Godlike = 95.0
+# Unique = 90.0
+# Legendary = 85.0
+# Mythic = 80.0
+# Epic = 75.0
+# Ultra Rare = 65.0
+# Rare = 55.0
+# Uncommon = 45.0
+# Common = 25.0
+# Poor = 0.0
