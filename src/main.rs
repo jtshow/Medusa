@@ -6,11 +6,8 @@ use std::fs;
 use std::time::Instant;
 use std::collections::HashMap;
 use walkdir::WalkDir;
-use serde_json;
 use regex::Regex;
 use lazy_static::lazy_static;
-use chrono;
-use fxhash;
 
 lazy_static! {
     // Regex for YAML frontmatter.
@@ -271,7 +268,7 @@ fn export_markdown(skills: &[Skill], output_path: &str) -> Result<(), Box<dyn st
             for gap in &skill.context.gaps {
                 md.push_str(&format!("- {}\n", gap));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
         md.push_str("---\n\n");
     }
@@ -373,7 +370,7 @@ fn build_learning_paths(skills: &[Skill]) -> Vec<LearningPath> {
     let mut categories: HashMap<String, Vec<&Skill>> = HashMap::new();
     for skill in skills {
         let category = skill.id.split('-').next().unwrap_or("other").to_string();
-        categories.entry(category).or_insert_with(Vec::new).push(skill);
+        categories.entry(category).or_default().push(skill);
     }
     
     for (category, category_skills) in categories {
@@ -520,7 +517,7 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
         .max_depth(4)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().file_name().map_or(false, |n| n == "SKILL.md"))
+        .filter(|e| e.path().file_name().is_some_and(|n| n == "SKILL.md"))
         .collect();
 
     let skills: Vec<_> = if parallel {
@@ -955,13 +952,13 @@ fn main() {
             };
             
             match std::process::Command::new("git")
-                .args(&["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
+                .args(["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     eprintln!("✅ Pull successful, rebuilding...");
                     match std::process::Command::new("cargo")
-                        .args(&["build", "--release"])
+                        .args(["build", "--release"])
                         .current_dir(repo_dir)
                         .status()
                     {
