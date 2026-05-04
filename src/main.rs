@@ -1,17 +1,16 @@
 //! Medusa - Ultra-Fast Skill Scanner v0.11 (MSF)
 //! Features: Audit-based ranking (60/30/10), auto-promotion, 9-tier system, context building
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 use std::time::Instant;
 use std::collections::HashMap;
-use rayon::prelude::*;
 use walkdir::WalkDir;
 use serde_json;
 use regex::Regex;
 use lazy_static::lazy_static;
-use std::io;
 use chrono;
+use fxhash;
 
 lazy_static! {
     // Regex for YAML frontmatter.
@@ -48,7 +47,7 @@ struct Skill {
     context: SkillContext,  // NEW: Context information!
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct SkillContext {
     dependencies: Vec<SkillDep>,
     fusion_opportunities: Vec<String>,
@@ -91,7 +90,7 @@ struct FusionMatch {
     match_type: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct MedusaConfig {
     #[serde(default = "default_complexity_weight")]
     complexity_weight: f64,
@@ -109,8 +108,13 @@ fn default_keyword_weight() -> f64 { 0.1 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct ScanCache {
-    file_hashes: HashMap<String, u64>,
-    results: Vec<Skill>,
+    entries: HashMap<String, CacheEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CacheEntry {
+    hash: u64,
+    skill: Skill,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -157,7 +161,7 @@ fn analyze_skill_complexity(content: &str) -> SkillMetrics {
     complexity = complexity.min(100.0);
     
     // Calculate value score (30% weight in scoring).
-    let mut value = 50.0; // Base value.
+    let mut value: f64 = 50.0; // Base value.
     
     if content_length > 500 { value += 10.0; }
     if code_blocks > 0 { value += 15.0; }
@@ -228,9 +232,10 @@ fn export_csv(skills: &[Skill], output_path: &str) -> Result<(), Box<dyn std::er
     csv.push_str("ID,Label,Description,Experience,Level,Confidence,ContentLength,CodeBlocks,Steps,TechTerms,Complexity,Value\n");
     
     for skill in skills {
+        let desc_escaped = skill.description.replace('"', "\"\"");
         csv.push_str(&format!(
             "{},\"{}\",\"{}\",{:.1},{},{:.2},{},{},{},{},{:.1},{:.1}\n",
-            skill.id, skill.label, skill.description.replace('"', "'"), 
+            skill.id, skill.label, desc_escaped,
             skill.experience, skill.level, skill.confidence,
             skill.metrics.content_length, skill.metrics.code_blocks,
             skill.metrics.step_count, skill.metrics.tech_term_count,
@@ -312,13 +317,18 @@ fn export_svg(skills: &[Skill], output_path: &str) -> Result<(), Box<dyn std::er
         ));
     }
     
+    svg.push_str("</svg>");
+    fs::write(output_path, svg)?;
+    Ok(())
+}
+
 /// Load Medusa configuration from medusa.toml
 fn load_config(path: &Path) -> MedusaConfig {
     let config_path = path.join("medusa.toml");
     if config_path.exists() {
         fs::read_to_string(&config_path)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default()
     } else {
         MedusaConfig::default()
@@ -385,6 +395,9 @@ fn build_learning_paths(skills: &[Skill]) -> Vec<LearningPath> {
         });
     }
     
+    paths
+}
+
 /// Get 9-tier level (based on experience score).
 fn get_level(exp: f64) -> String {
     match exp {
@@ -511,32 +524,39 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
         .collect();
 
     let skills: Vec<_> = if parallel {
-        entries
-            .par_iter()
-            .filter_map(|entry| {
-                let path_str = entry.path().to_string_lossy().to_string();
-                let metadata = fs::metadata(entry.path()).ok()?;
-                let modified = metadata.modified().ok()?;
-                let hash = modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+        let mut new_skills = Vec::new();
+        let mut cache_updates: Vec<(String, u64, Skill)> = Vec::new();
+        
+        for entry in entries {
+            let path_str = entry.path().to_string_lossy().to_string();
+            
+            // Calculate content hash for better caching
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let hash = fxhash::hash64(&content.as_bytes());
                 
                 // Check cache
-                if use_cache && cache.file_hashes.get(&path_str) == Some(&hash) {
-                    if let Some(cached) = cache.results.iter().find(|s| s.id == entry.path().file_stem()?.to_str()?) {
-                        return Some(cached.clone());
+                if use_cache {
+                    if let Some(entry) = cache.entries.get(&path_str) {
+                        if entry.hash == hash {
+                            new_skills.push(entry.skill.clone());
+                            continue;
+                        }
                     }
                 }
                 
-                let content = fs::read_to_string(entry.path()).ok()?;
-                let skill = parse_skill_md(&content, entry.path(), &config)?;
-                
-                // Update cache
-                cache.file_hashes.insert(path_str, hash);
-                cache.results.retain(|s| s.id != skill.id);
-                cache.results.push(skill.clone());
-                
-                Some(skill)
-            })
-            .collect()
+                if let Some(skill) = parse_skill_md(&content, entry.path(), &config) {
+                    cache_updates.push((path_str.clone(), hash, skill));
+                }
+            }
+        }
+        
+        // Update cache
+        for (path_str, hash, skill) in cache_updates {
+            cache.entries.insert(path_str, CacheEntry { hash, skill: skill.clone() });
+            new_skills.push(skill);
+        }
+        
+        new_skills
     } else {
         entries
             .iter()
@@ -760,10 +780,10 @@ fn run_ab_test(path: &str, iterations: usize) -> Result<(), Box<dyn std::error::
     let mut sequential_times = Vec::new();
 
     for i in 1..=iterations {
-        let parallel_result = scan_skills(path, true)?;
+        let parallel_result = scan_skills(path, true, true)?;
         parallel_times.push(parallel_result.scan_time_ms);
-
-        let sequential_result = scan_skills(path, false)?;
+        
+        let sequential_result = scan_skills(path, false, true)?;
         sequential_times.push(sequential_result.scan_time_ms);
 
         eprintln!("Iteration {}: Parallel={}ms, Sequential={}ms",
@@ -925,14 +945,24 @@ fn main() {
         }
         "update" => {
             eprintln!("Updating Medusa from GitHub...");
+            // Get the directory where medusa.exe is located
+            let exe_path = std::env::current_exe().unwrap_or_default();
+            let exe_dir = exe_path.parent().unwrap_or(Path::new("."));
+            let repo_dir = if exe_dir.ends_with("release") || exe_dir.ends_with("debug") {
+                exe_dir.parent().unwrap_or(Path::new(".")).parent().unwrap_or(Path::new("."))
+            } else {
+                exe_dir
+            };
+            
             match std::process::Command::new("git")
-                .args(&["-C", ".", "pull", "https://github.com/jtshow/medusa.git"])
+                .args(&["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     eprintln!("✅ Pull successful, rebuilding...");
                     match std::process::Command::new("cargo")
                         .args(&["build", "--release"])
+                        .current_dir(repo_dir)
                         .status()
                     {
                         Ok(status) if status.success() => eprintln!("✅ Medusa updated to latest version!"),

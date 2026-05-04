@@ -1,5 +1,4 @@
 # Medusa Skill Framework (MSF) v0.11.
-[![medusa.jpg](https://i.postimg.cc/k5v9H1qt/medusa.jpg)](https://postimg.cc/p9rghB92)
 
 **The world's first audit-based skill ranking system.** Medusa scans your SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
 
