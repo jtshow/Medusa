@@ -1,5 +1,5 @@
-//! Medusa - Ultra-Fast Skill Scanner v0.6.0 (MSF)
-//! Features: Audit-based ranking, complexity analysis, automatic promotion.
+//! Medusa - Ultra-Fast Skill Scanner v0.11 (MSF)
+//! Features: Audit-based ranking (60/30/10), auto-promotion, 9-tier system, context building
 
 use std::path::Path;
 use std::fs;
@@ -61,7 +61,7 @@ struct ScanResult {
 }
 
 fn print_help() {
-    println!("Medusa Skill Framework (MSF) v0.6.0 - Audit-Based Ranking");
+    println!("Medusa Skill Framework (MSF) v0.11.0 - Audit-Based Ranking with Context");
     println!("Usage: medusa <command> [options]");
     println!("\nCommands:");
     println!("  scan <path>              Scan skills with audit-based ranking");
@@ -70,6 +70,7 @@ fn print_help() {
     println!("    --sequential           Use sequential scanning");
     println!("\n  ab-test <path>          Run A/B test (parallel vs sequential)");
     println!("    --iterations N         Number of test iterations (default: 10)");
+    println!("\n  update                  Update Medusa from GitHub (git pull + rebuild)");
     println!("\n  audit <path>            Show detailed skill audit report");
     println!("\nOptions:");
     println!("  --help, -h              Show this help message");
@@ -244,7 +245,7 @@ fn scan_skills(path: &str, parallel: bool) -> Result<ScanResult, Box<dyn std::er
             scan_time_ms: 0,
             fusion_matches: vec![],
             rust_used: true,
-            version: "0.6.0".to_string(),
+             version: "0.11.0".to_string(),
             scan_type: if parallel { "parallel" } else { "sequential" }.to_string(),
         });
     }
@@ -349,16 +350,16 @@ fn generate_html(result: &ScanResult, output_path: &str) -> Result<(), Box<dyn s
     html.push_str("        body { font-family: monospace; background: #0a0e27; color: #00ff41; margin: 20px; }\n");
     html.push_str("        h1 { color: #00ff41; text-shadow: 0 0 10px #00ff41; }\n");
     html.push_str("        .skill { background: #1a1f3a; border: 1px solid #00ff41; padding: 15px; margin: 10px 0; border-radius: 5px; }\n");
-    html.push_str("        .level-godlike { border-left: 5px solid #ff00ff; background: linear-gradient(90deg, #1a1f3a, #2a003f); }\n");
-    html.push_str("        .level-unique { border-left: 5px solid #ffaa00; background: linear-gradient(90deg, #1a1f3a, #2a1f00); }\n");
-    html.push_str("        .level-legendary { border-left: 5px solid #ff6600; background: linear-gradient(90deg, #1a1f3a, #2a1f00); }\n");
-    html.push_str("        .level-mythic { border-left: 5px solid #cc00ff; background: linear-gradient(90deg, #1a1f3a, #1f002a); }\n");
-    html.push_str("        .level-epic { border-left: 5px solid #aa00ff; }\n");
-    html.push_str("        .level-ultra-rare { border-left: 5px solid #ff0066; }\n");
-    html.push_str("        .level-rare { border-left: 5px solid #ffaa00; }\n");
-    html.push_str("        .level-uncommon { border-left: 5px solid #00aaff; }\n");
-    html.push_str("        .level-common { border-left: 5px solid #00ff41; }\n");
-    html.push_str("        .level-poor { border-left: 5px solid #666; }\n");
+    html.push_str("        .level-godlike { border-left: 5px solid #ff6600; background: linear-gradient(90deg, #ff0000, #ff6600, #00ff41); }\n");
+    html.push_str("        .level-unique { border-left: 5px solid #ff0000; background: #ff0000; }\n");
+    html.push_str("        .level-legendary { border-left: 5px solid #ff00ff; background: #ff00ff; }\n");
+    html.push_str("        .level-mythic { border-left: 5px solid #9900ff; background: #9900ff; }\n");
+    html.push_str("        .level-epic { border-left: 5px solid #ffcc00; background: #ffcc00; }\n");
+    html.push_str("        .level-ultra-rare { border-left: 5px solid #00aa88; background: #00aa88; }\n");
+    html.push_str("        .level-rare { border-left: 5px solid #0088ff; background: #0088ff; }\n");
+    html.push_str("        .level-uncommon { border-left: 5px solid #00ff41; background: #00ff41; }\n");
+    html.push_str("        .level-common { border-left: 5px solid #cccccc; background: #cccccc; }\n");
+    html.push_str("        .level-poor { border-left: 5px solid #333333; background: #333333; }\n");
     html.push_str("        .fusion { background: #2a1f3a; border: 1px solid #ff00ff; padding: 10px; margin: 5px 0; }\n");
     html.push_str("        .meta { color: #888; font-size: 12px; }\n");
     html.push_str("        .bar { background: #333; height: 20px; border-radius: 10px; overflow: hidden; }\n");
@@ -431,7 +432,7 @@ fn run_ab_test(path: &str, iterations: usize) -> Result<(), Box<dyn std::error::
 }
 
 fn print_audit_report(skills: &[Skill]) {
-    println!("\n=== Medusa Skill Audit Report ===\n");
+    println!("\n=== Medusa Skill Audit Report (v0.11) ===\n");
     
     for skill in skills {
         println!("Skill: {} ({}), level: {}", skill.label, skill.id, skill.level);
@@ -470,7 +471,7 @@ fn main() {
             print_help();
         }
         "--version" | "-v" => {
-            println!("Medusa Skill Framework (MSF) v0.6.0");
+            println!("Medusa Skill Framework (MSF) v0.11.0");
         }
         "scan" => {
             if args.len() < 3 {
@@ -519,6 +520,27 @@ fn main() {
             }
             if let Err(e) = run_ab_test(path, iterations) {
                 eprintln!("A/B test error: {}", e);
+            }
+        }
+        "update" => {
+            eprintln!("Updating Medusa from GitHub...");
+            match std::process::Command::new("git")
+                .args(&["-C", ".", "pull", "https://github.com/jtshow/medusa.git"])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    eprintln!("✅ Pull successful, rebuilding...");
+                    match std::process::Command::new("cargo")
+                        .args(&["build", "--release"])
+                        .status()
+                    {
+                        Ok(status) if status.success() => eprintln!("✅ Medusa updated to latest version!"),
+                        Ok(_) => eprintln!("❌ Build failed"),
+                        Err(e) => eprintln!("❌ Build error: {}", e),
+                    }
+                }
+                Ok(_) => eprintln!("❌ Git pull failed"),
+                Err(e) => eprintln!("❌ Git error: {}", e),
             }
         }
         "audit" => {

@@ -1,4 +1,4 @@
-# Medusa Skill Framework (MSF) v0.6.0.
+# Medusa Skill Framework (MSF) v0.11.
 
 **The world's first audit-based skill ranking system.** Medusa scans your SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
 
@@ -57,11 +57,15 @@ cargo build --release
 
 ### Scan Skills (JSON Output)
 ```bash
-medusa scan /pathofyourskills
+# Windows
+& "C:\pathtoskills
+
+# macOS/Linux
+/path/to/skills```
 
 ### Audit a Skill (See WHY it's at its tier)
 ```bash
-medusa audit /path/to/skills/
+medusa audit /path/to/skills/ai-ml
 ```
 
 **Example Output:**
@@ -91,16 +95,16 @@ Opens beautiful dark-themed visualization with color-coded tiers!
 
 | Tier | Range | Color |
 |------|--------|--------|
-| **Godlike** | 95+ | 🟣 Purple gradient |
-| **Unique** | 90+ | 🟠 Orange gradient |
-| **Legendary** | 85+ | 🟠 Orange-red gradient |
-| **Mythic** | 80+ | 🟣 Pink gradient |
-| **Epic** | 75+ | 🟣 Purple solid |
-| **Ultra Rare** | 65+ | 🩷 Pink solid |
-| **Rare** | 55+ | 🟠 Orange solid |
-| **Uncommon** | 45+ | 🔵 Blue solid |
-| **Common** | 25+ | 🟢 Green solid |
-| **Poor** | <25 | ⚪ Gray solid |
+| **Godlike** | 95+ | 🔴 Red-Orange-Green gradient |
+| **Unique** | 90+ | 🔴 Red solid |
+| **Legendary** | 85+ | 💜 Pink-Purple solid |
+| **Mythic** | 80+ | 🟣 Purple solid |
+| **Epic** | 75+ | 🟡 Yellow solid |
+| **Ultra Rare** | 65+ | 🟢 Teal solid |
+| **Rare** | 55+ | 🔵 Blue solid |
+| **Uncommon** | 45+ | 🟢 Green solid |
+| **Common** | 25+ | ⚪ Light Gray solid |
+| **Poor** | <25 | ⚫ Dark Gray solid |
 
 ## Agent Integration ✅.
 
@@ -136,6 +140,13 @@ Medusa outputs **pure JSON** - perfect for any agent:
 
 **No WSL needed!** Runs natively on all platforms.
 
+## Update Medusa
+
+```bash
+# One-line update (pull latest + rebuild)
+cd /path/to/medusa && git pull && cargo build --release
+```
+
 ## Why "Audit-Based"?
 
 Traditional systems use **static rankings** (you manually set levels).
@@ -150,7 +161,7 @@ Medusa uses **audit-based ranking**:
 
 ```
 medusa-github/
-├── src/main.rs          # Core (v0.6.0)
+├── src/main.rs          # Core (v0.11)
 ├── target/release/
 │   └── medusa          # Binary (NO .exe extension!)
 ├── Cargo.toml          # 7 minimal deps
