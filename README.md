@@ -1,7 +1,7 @@
 # Medusa Skill Framework (MSF) v0.11.
 [![medusa.jpg](https://i.postimg.cc/k5v9H1qt/medusa.jpg)](https://postimg.cc/p9rghB92)
 
-**The world's first audit-based skill ranking system.** Medusa scans your SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
+**The world's first audit-based skill ranking system.** Medusa scans your agents SKILL.md files, measures actual complexity (code blocks, steps, technical terms), and automatically promotes skills through 9 tiers - just like how cooking 1 pizza vs 20+ varieties with techniques upgrades your skill level.
 
 ## What It Does.
 
@@ -21,7 +21,7 @@ Medusa reads your `SKILL.md` files and acts like a **technical auditor**:
 | "15 varieties + techniques" (3000 chars, 15 steps) | 12 tech terms | Complexity: 65/100 | **Ultra Rare** |
 | "20+ varieties, ingredients, methods" (6000+ chars, 25+ terms) | 10+ code blocks | Complexity: 85+/100 | **Godlike** 🟣 |
 
-**As you improve your skills, Medusa automatically promotes them!**
+**As you improve your agents skills or it improvees them, Medusa automatically promotes them!**
 
 ## ⚡ One-Line Install.
 
