@@ -18,3 +18,10 @@ keyword_weight = 0.1        # Weight for keyword bonuses (default: 0.1)
 # Uncommon = 45.0
 # Common = 25.0
 # Poor = 0.0
+
+# Dreaming configuration
+[dreaming]
+frequency_scans = 1       # Run dream every N scans (default: 1)
+retention_percent = 0.8   # Memory retention (0.0-1.0, higher = keep more, default: 0.8)
+auto_apply = true          # Auto-apply pattern changes (default: true)
+max_insights = 200         # Maximum insights to keep after consolidation (default: 200)

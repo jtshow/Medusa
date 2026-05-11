@@ -1,13 +1,21 @@
-//! Medusa - Ultra-Fast Skill Scanner v0.11 (MSF)
-//! Features: Audit-based ranking (60/30/10), auto-promotion, 9-tier system, context building
+//! Medusa - Ultra-Fast Skill Scanner v0.12 (MSF)
+//! Features: Audit-based ranking (60/30/10), auto-promotion, 9-tier system, context building, dreaming
+
+mod dream;
+mod outcomes;
+mod agents;
+mod procedural;
 
 use std::path::Path;
 use std::fs;
 use std::time::Instant;
 use std::collections::HashMap;
 use walkdir::WalkDir;
+use serde_json;
 use regex::Regex;
 use lazy_static::lazy_static;
+use chrono;
+use fxhash;
 
 lazy_static! {
     // Regex for YAML frontmatter.
@@ -23,48 +31,48 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct SkillMetrics {
-    content_length: usize,
-    code_blocks: usize,
-    step_count: usize,
-    tech_term_count: usize,
-    complexity_score: f64,
-    value_score: f64,
+pub struct SkillMetrics {
+    pub content_length: usize,
+    pub code_blocks: usize,
+    pub step_count: usize,
+    pub tech_term_count: usize,
+    pub complexity_score: f64,
+    pub value_score: f64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Skill {
-    id: String,
-    label: String,
-    description: String,
-    experience: f64,
-    level: String,
-    confidence: f64,
-    metrics: SkillMetrics,
-    context: SkillContext,  // NEW: Context information!
+pub struct Skill {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub experience: f64,
+    pub level: String,
+    pub confidence: f64,
+    pub metrics: SkillMetrics,
+    pub context: SkillContext,  // NEW: Context information!
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-struct SkillContext {
-    dependencies: Vec<SkillDep>,
-    fusion_opportunities: Vec<String>,
-    improvement_history: Vec<ImprovementRecord>,
-    gaps: Vec<String>,
+pub struct SkillContext {
+    pub dependencies: Vec<SkillDep>,
+    pub fusion_opportunities: Vec<String>,
+    pub improvement_history: Vec<ImprovementRecord>,
+    pub gaps: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct SkillDep {
-    name: String,
-    relationship: String,
-    context: String,
+pub struct SkillDep {
+    pub name: String,
+    pub relationship: String,
+    pub context: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ImprovementRecord {
-    date: String,
-    action: String,
-    impact: String,
-    evidence: String,
+pub struct ImprovementRecord {
+    pub date: String,
+    pub action: String,
+    pub impact: String,
+    pub evidence: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -77,6 +85,35 @@ struct ScanResult {
     version: String,
     scan_type: String,
     learning_paths: Vec<LearningPath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dream_summary: Option<DreamSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skill_outcomes: Option<Vec<SkillOutcome>>,
+    #[serde(skip)]
+    contents: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct DreamSummary {
+    patterns_found: usize,
+    sessions_analyzed: usize,
+    last_dream: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct SkillOutcome {
+    skill_id: String,
+    level: String,
+    score: f64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SharedMemoryBundle {
+    source: String,
+    exported_at: String,
+    dreaming: dream::DreamKnowledgeBase,
+    procedural: procedural::ProceduralMemory,
+    outcomes: outcomes::OutcomeStore,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -97,11 +134,40 @@ struct MedusaConfig {
     keyword_weight: f64,
     #[serde(default)]
     tier_thresholds: HashMap<String, f64>,
+    #[serde(default)]
+    dreaming: DreamingConfig,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct DreamingConfig {
+    #[serde(default = "default_dream_frequency")]
+    frequency_scans: usize,
+    #[serde(default = "default_dream_retention")]
+    retention_percent: f64,
+    #[serde(default = "default_dream_auto_apply")]
+    auto_apply: bool,
+    #[serde(default = "default_dream_max_insights")]
+    max_insights: usize,
+}
+
+impl Default for DreamingConfig {
+    fn default() -> Self {
+        DreamingConfig {
+            frequency_scans: default_dream_frequency(),
+            retention_percent: default_dream_retention(),
+            auto_apply: default_dream_auto_apply(),
+            max_insights: default_dream_max_insights(),
+        }
+    }
 }
 
 fn default_complexity_weight() -> f64 { 0.6 }
 fn default_value_weight() -> f64 { 0.3 }
 fn default_keyword_weight() -> f64 { 0.1 }
+fn default_dream_frequency() -> usize { 1 }
+fn default_dream_retention() -> f64 { 0.8 }
+fn default_dream_auto_apply() -> bool { true }
+fn default_dream_max_insights() -> usize { 200 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct ScanCache {
@@ -179,7 +245,7 @@ fn analyze_skill_complexity(content: &str) -> SkillMetrics {
 
 /// Extract YAML frontmatter.
 fn extract_frontmatter_str(content: &str) -> Option<&str> {
-    if !content.starts_with("---") {
+    if !content.starts_with("---") || content.len() < 5 {
         return None;
     }
     let start = 4;
@@ -268,7 +334,7 @@ fn export_markdown(skills: &[Skill], output_path: &str) -> Result<(), Box<dyn st
             for gap in &skill.context.gaps {
                 md.push_str(&format!("- {}\n", gap));
             }
-            md.push('\n');
+            md.push_str("\n");
         }
         md.push_str("---\n\n");
     }
@@ -370,7 +436,7 @@ fn build_learning_paths(skills: &[Skill]) -> Vec<LearningPath> {
     let mut categories: HashMap<String, Vec<&Skill>> = HashMap::new();
     for skill in skills {
         let category = skill.id.split('-').next().unwrap_or("other").to_string();
-        categories.entry(category).or_default().push(skill);
+        categories.entry(category).or_insert_with(Vec::new).push(skill);
     }
     
     for (category, category_skills) in categories {
@@ -379,7 +445,7 @@ fn build_learning_paths(skills: &[Skill]) -> Vec<LearningPath> {
         }
         
         let mut sorted_skills = category_skills.clone();
-        sorted_skills.sort_by(|a, b| a.experience.partial_cmp(&b.experience).unwrap());
+        sorted_skills.sort_by(|a, b| a.experience.partial_cmp(&b.experience).unwrap_or(std::cmp::Ordering::Equal));
         
         let skill_names: Vec<String> = sorted_skills.iter().map(|s| s.id.clone()).collect();
         let total_exp: f64 = sorted_skills.iter().map(|s| s.experience).sum();
@@ -496,9 +562,12 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
             scan_time_ms: 0,
             fusion_matches: vec![],
             learning_paths: vec![],
+            dream_summary: None,
+            skill_outcomes: None,
             rust_used: true,
-            version: "0.11.0".to_string(),
+            version: "0.12.0".to_string(),
             scan_type: if parallel { "parallel" } else { "sequential" }.to_string(),
+            contents: HashMap::new(),
         });
     }
 
@@ -517,9 +586,10 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
         .max_depth(4)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().file_name().is_some_and(|n| n == "SKILL.md"))
+        .filter(|e| e.path().file_name().map_or(false, |n| n == "SKILL.md"))
         .collect();
 
+    let mut contents: HashMap<String, String> = HashMap::new();
     let skills: Vec<_> = if parallel {
         let mut new_skills = Vec::new();
         let mut cache_updates: Vec<(String, u64, Skill)> = Vec::new();
@@ -533,15 +603,17 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
                 
                 // Check cache
                 if use_cache {
-                    if let Some(entry) = cache.entries.get(&path_str) {
-                        if entry.hash == hash {
-                            new_skills.push(entry.skill.clone());
+                    if let Some(cached) = cache.entries.get(&path_str) {
+                        if cached.hash == hash {
+                            contents.insert(cached.skill.id.clone(), content);
+                            new_skills.push(cached.skill.clone());
                             continue;
                         }
                     }
                 }
                 
                 if let Some(skill) = parse_skill_md(&content, entry.path(), &config) {
+                    contents.insert(skill.id.clone(), content);
                     cache_updates.push((path_str.clone(), hash, skill));
                 }
             }
@@ -559,32 +631,70 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
             .iter()
             .filter_map(|entry| {
                 let content = fs::read_to_string(entry.path()).ok()?;
-                parse_skill_md(&content, entry.path(), &config)
+                if let Some(skill) = parse_skill_md(&content, entry.path(), &config) {
+                    contents.insert(skill.id.clone(), content);
+                    Some(skill)
+                } else {
+                    None
+                }
             })
             .collect()
     };
 
-    // Save cache
+    // Save cache (skip if serialization fails to avoid corruption)
     if use_cache {
-        let _ = fs::write(&cache_path, serde_json::to_string_pretty(&cache).unwrap_or_default());
+        if let Ok(json) = serde_json::to_string_pretty(&cache) {
+            let _ = fs::write(&cache_path, json);
+        }
     }
 
     let mut skills = skills;
-    skills.sort_by(|a, b| b.experience.partial_cmp(&a.experience).unwrap());
+    skills.sort_by(|a, b| b.experience.partial_cmp(&a.experience).unwrap_or(std::cmp::Ordering::Equal));
 
     let fusion_matches = detect_fusion(&skills);
     let learning_paths = build_learning_paths(&skills);
 
     let elapsed = start.elapsed();
 
+    // Cross-session dream context
+    let dream_summary = {
+        let kb = dream::load_knowledge_base_from_path(path);
+        if kb.total_patterns_found > 0 {
+            Some(DreamSummary {
+                patterns_found: kb.total_patterns_found,
+                sessions_analyzed: kb.total_sessions_analyzed,
+                last_dream: kb.last_dream_time.unwrap_or_else(|| "never".to_string()),
+            })
+        } else {
+            None
+        }
+    };
+
+    // Outcome assessments
+    let outcome_store = outcomes::load_outcomes(path);
+    let skill_outcomes: Option<Vec<SkillOutcome>> = if !outcome_store.rubrics.is_empty() {
+        Some(skills.iter().filter_map(|s| {
+            outcomes::assess_skill(&s.id, s.metrics.content_length, s.metrics.code_blocks, s.metrics.step_count, s.metrics.tech_term_count, &outcome_store)
+                .map(|a| SkillOutcome { skill_id: s.id.clone(), level: a.level, score: a.score })
+        }).collect())
+    } else {
+        None
+    };
+
+    // Extract procedural workflows from skill content
+    procedural::extract_workflows_from_skills(&skills, &contents, path);
+
     Ok(ScanResult {
         total: skills.len(),
         scan_time_ms: elapsed.as_millis() as u64,
         skills,
+        contents,
         fusion_matches,
         learning_paths,
+        dream_summary,
+        skill_outcomes,
         rust_used: true,
-        version: "0.11.0".to_string(),
+        version: "0.12.0".to_string(),
         scan_type: if parallel { "parallel" } else { "sequential" }.to_string(),
     })
 }
@@ -615,7 +725,7 @@ fn detect_fusion(skills: &[Skill]) -> Vec<FusionMatch> {
         }
     }
 
-    matches.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+    matches.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
     matches.truncate(20);
     matches
 }
@@ -643,7 +753,7 @@ fn string_similarity(s1: &str, s2: &str) -> f64 {
 
 /// Print help.
 fn print_help() {
-    println!("Medusa Skill Framework (MSF) v0.11.0 - Audit-Based Ranking with Context");
+    println!("Medusa Skill Framework (MSF) v0.12.0 - Audit-Based Ranking with Context");
     println!("Usage: medusa <command> [options]");
     println!("\nCommands:");
     println!("  scan <path>              Scan skills with FULL audit (60/30/10 scoring)");
@@ -657,6 +767,28 @@ fn print_help() {
     println!("\n  export-csv <path> <f>  Export skills to CSV format");
     println!("  export-md <path> <f>   Export skills to Markdown format");
     println!("  export-svg <path> <f>  Export skills to SVG visualization");
+    println!("\n  dream <path>            Run dreaming process (cross-session pattern detection)");
+    println!("  dream-status <path>     Show dream knowledge base");
+    println!("  dream-reset <path>      Reset dream state and history");
+    println!("  dream-consolidate <path> Manually consolidate dream knowledge base");
+    println!("  dream-diary <path>       Show dream diary (narrative skill evolution timeline)");
+    println!("    --output <file.md>     Export diary as Markdown");
+    println!("  dream-params <path>      Show dreaming configuration parameters");
+    println!("\nProcedural Memory:");
+    println!("  procedural-list <path>    List all learned procedural workflows");
+    println!("  procedural-show <path> <id>  Show workflows associated with a skill");
+    println!("\nMemory Sharing:");
+    println!("  memory-export <path> <f>  Export all memory (dream, procedural, outcomes) to a JSON bundle");
+    println!("  memory-import <path> <f>  Import and merge a memory bundle from another Medusa instance");
+    println!("    --source <name>        Tag imported data with a source identifier (default: 'shared')");
+    println!("\nOrchestration:");
+    println!("  orchestrate <path>       Run multi-agent orchestrated audit (4 specialized sub-audits)");
+    println!("    --sequential           Use sequential scanning");
+    println!("    --no-cache             Disable cache");
+    println!("\n  outcome-add <path> <id>  Add default outcome rubric for a skill");
+    println!("  outcome-list <path>      List outcome rubrics");
+    println!("  outcome-remove <path> <id>  Remove an outcome rubric");
+    println!("  learning-path <path> <id>  Show learning path and suggestions for a skill");
     println!("\n  ab-test <path>          Run A/B test (parallel vs sequential)");
     println!("    --iterations N         Number of test iterations (default: 10)");
     println!("\n  update                  Update Medusa from GitHub (git pull + rebuild)");
@@ -670,9 +802,9 @@ fn print_help() {
     println!("  medusa export-csv /path/to/skills skills.csv # CSV export");
 }
 
-/// Print audit report with FULL context.
-fn print_audit_report(skills: &[Skill]) {
-    println!("\n=== Medusa Skill Audit Report (v0.11) ===\n");
+/// Print audit report with FULL context and optional cross-session dream context.
+fn print_audit_report(skills: &[Skill], dream_kb: Option<&dream::DreamKnowledgeBase>) {
+    println!("\n=== Medusa Skill Audit Report (v0.12) ===\n");
     
     for skill in skills {
         println!("Skill: {} ({})", skill.label, skill.id);
@@ -700,10 +832,26 @@ fn print_audit_report(skills: &[Skill]) {
                 println!("    - {}: {} ({})", dep.name, dep.relationship, dep.context);
             }
         }
+        
+        // Cross-session learning context (from dreaming process)
+        if let Some(kb) = dream_kb {
+            let cross_session = dream::get_cross_session_summary(kb, &skill.id);
+            if !cross_session.is_empty() {
+                println!("\n  Cross-Session Insights (from dreaming):");
+                for line in &cross_session {
+                    println!("    - {}", line);
+                }
+            }
+        }
         println!();
     }
     
     // Summary.
+    if skills.is_empty() {
+        println!("=== Summary ===");
+        println!("Total Skills: 0");
+        return;
+    }
     let avg_complexity = skills.iter().map(|s| s.metrics.complexity_score).sum::<f64>() / skills.len() as f64;
     let avg_value = skills.iter().map(|s| s.metrics.value_score).sum::<f64>() / skills.len() as f64;
     
@@ -711,10 +859,16 @@ fn print_audit_report(skills: &[Skill]) {
     println!("Total Skills: {}", skills.len());
     println!("Average Complexity: {:.1}/100 (60% of ranking)", avg_complexity);
     println!("Average Value: {:.1}/100 (30% of ranking)", avg_value);
+    
+    if let Some(kb) = dream_kb {
+        if kb.total_patterns_found > 0 {
+            println!("Dream Patterns Available: {} (run 'medusa dream-status <path>' for full report)", kb.total_patterns_found);
+        }
+    }
 }
 
-/// Generate HTML with context.
-fn generate_html(result: &ScanResult, output_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Generate HTML with context and cross-session learning.
+fn generate_html(result: &ScanResult, output_path: &str, dream_kb: Option<&dream::DreamKnowledgeBase>) -> Result<(), Box<dyn std::error::Error>> {
     let mut html = String::new();
     
     html.push_str("        body { font-family: monospace; background: #0a0e27; color: #00ff41; margin: 20px; }\n");
@@ -736,21 +890,40 @@ fn generate_html(result: &ScanResult, output_path: &str) -> Result<(), Box<dyn s
     html.push_str("        .bar-fill { background: linear-gradient(90deg, #00ff41, #00aaff); height: 100%; }\n");
     html.push_str("        .metrics { font-size: 11px; color: #aaa; margin-top: 5px; }\n");
     html.push_str("        .context { font-size: 10px; color: #888; margin-top: 3px; }\n");
+    html.push_str("        .dream { font-size: 10px; color: #ff00ff; margin-top: 3px; }\n");
+    html.push_str("        .dream-section { background: #1a0a2e; border: 1px solid #ff00ff; padding: 10px; margin: 10px 0; border-radius: 5px; }\n");
     html.push_str("    </style>\n</head>\n<body>\n");
     
-    html.push_str(&format!("    <h1>Medusa Scan Report (v0.11)</h1>\n    <div class=\"meta\"><p>Total Skills: {} | Scan Time: {}ms | Version: {} | Type: {}</p></div>\n",
+    html.push_str(&format!("    <h1>Medusa Scan Report (v0.12)</h1>\n    <div class=\"meta\"><p>Total Skills: {} | Scan Time: {}ms | Version: {} | Type: {}</p></div>\n",
         result.total, result.scan_time_ms, result.version, result.scan_type));
     
     html.push_str("    <h2>Skills (Sorted by Experience)</h2>\n    <div id=\"skills\">\n");
     for s in &result.skills {
+        let mut dream_line = String::new();
+        if let Some(kb) = dream_kb {
+            let cross = dream::get_cross_session_summary(kb, &s.id);
+            if !cross.is_empty() {
+                dream_line = format!("<p class=\"dream\">Cross-Session: {}</p>", cross.join(" | "));
+            }
+        }
         html.push_str(&format!(
-            "        <div class=\"skill level-{}\"><h3>{} <span class=\"meta\">[{}]</span></h3><p>{}</p><div class=\"bar\"><div class=\"bar-fill\" style=\"width: {}%\"></div></div><p class=\"meta\">ID: {} | Exp: {} | Conf: {}%</p><p class=\"metrics\">Len: {} | Code: {} | Steps: {} | Terms: {} | Comp: {:.1} | Val: {:.1}</p><p class=\"context\">Gaps: {}</p></div>\n",
+            "        <div class=\"skill level-{}\"><h3>{} <span class=\"meta\">[{}]</span></h3><p>{}</p><div class=\"bar\"><div class=\"bar-fill\" style=\"width: {}%\"></div></div><p class=\"meta\">ID: {} | Exp: {} | Conf: {}%</p><p class=\"metrics\">Len: {} | Code: {} | Steps: {} | Terms: {} | Comp: {:.1} | Val: {:.1}</p><p class=\"context\">Gaps: {}</p>{}</div>\n",
             s.level.to_lowercase(), s.label, s.level, s.description, s.experience, s.id, s.experience, (s.confidence * 100.0).floor(),
             s.metrics.content_length, s.metrics.code_blocks, s.metrics.step_count, s.metrics.tech_term_count, s.metrics.complexity_score, s.metrics.value_score,
-            s.context.gaps.join(", ")
+            s.context.gaps.join(", "), dream_line
         ));
     }
     html.push_str("    </div>\n");
+    
+    if let Some(kb) = dream_kb {
+        if kb.total_patterns_found > 0 {
+            html.push_str("    <div class=\"dream-section\">\n");
+            html.push_str(&format!("    <h2>Dream Patterns ({} total)</h2>\n", kb.total_patterns_found));
+            html.push_str(&format!("    <p class=\"meta\">Sessions Analyzed: {} | Last Dream: {}</p>\n",
+                kb.total_sessions_analyzed, kb.last_dream_time.as_deref().unwrap_or("never")));
+            html.push_str("    </div>\n");
+        }
+    }
     
     html.push_str("    <h2>Fusion Detection (Similar Skills)</h2>\n    <div id=\"fusion\">\n");
     for f in &result.fusion_matches {
@@ -767,6 +940,10 @@ fn generate_html(result: &ScanResult, output_path: &str) -> Result<(), Box<dyn s
 
 /// Run A/B test.
 fn run_ab_test(path: &str, iterations: usize) -> Result<(), Box<dyn std::error::Error>> {
+    if iterations == 0 {
+        eprintln!("Error: --iterations must be at least 1");
+        return Ok(());
+    }
     eprintln!("Running A/B Test: Parallel vs Sequential Scan");
     eprintln!("Path: {}", path);
     eprintln!("Iterations: {}", iterations);
@@ -818,7 +995,7 @@ fn main() {
             print_help();
         }
         "--version" | "-v" => {
-            println!("Medusa Skill Framework (MSF) v0.11.0");
+            println!("Medusa Skill Framework (MSF) v0.12.0");
         }
         "scan" => {
             if args.len() < 3 {
@@ -830,8 +1007,15 @@ fn main() {
             let sequential = args.iter().any(|a| a == "--sequential");
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(path, !sequential, use_cache) {
-                Ok(result) => println!("{}", serde_json::to_string_pretty(&result).unwrap()),
-                Err(e) => eprintln!("Error: {}", e),
+                Ok(result) => {
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(Path::new(path), &snapshots);
+                    match serde_json::to_string_pretty(&result) {
+                        Ok(json) => println!("{}", json),
+                        Err(e) => eprintln!("Error serializing scan output: {}. This may be caused by invalid numeric values (NaN) in skill scores.", e),
+                    }
+                }
+                Err(e) => eprintln!("Scan failed: {}. Check that the path exists and contains SKILL.md files.", e),
             }
         }
         "html" => {
@@ -846,12 +1030,15 @@ fn main() {
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(path, !sequential, use_cache) {
                 Ok(result) => {
-                    match generate_html(&result, output) {
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(Path::new(path), &snapshots);
+                    let dream_kb = Some(dream::load_knowledge_base_from_path(Path::new(path)));
+                    match generate_html(&result, output, dream_kb.as_ref()) {
                         Ok(_) => eprintln!("HTML report generated: {}", output),
-                        Err(e) => eprintln!("Error writing HTML: {}", e),
+                        Err(e) => eprintln!("Error writing HTML report to '{}': {}. Check that the output path is writable.", output, e),
                     }
                 }
-                Err(e) => eprintln!("Error: {}", e),
+                Err(e) => eprintln!("Scan failed: {}. Check that the path exists, is readable, and contains SKILL.md files.", e),
             }
         }
         "export-csv" => {
@@ -865,12 +1052,14 @@ fn main() {
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(path, true, use_cache) {
                 Ok(result) => {
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(Path::new(path), &snapshots);
                     match export_csv(&result.skills, output) {
                         Ok(_) => eprintln!("CSV exported: {}", output),
-                        Err(e) => eprintln!("Error writing CSV: {}", e),
+                        Err(e) => eprintln!("Error writing CSV to '{}': {}. Check that the output path is writable.", output, e),
                     }
                 }
-                Err(e) => eprintln!("Error: {}", e),
+                Err(e) => eprintln!("Scan failed: {}. Check that the path exists, is readable, and contains SKILL.md files.", e),
             }
         }
         "export-md" => {
@@ -884,12 +1073,14 @@ fn main() {
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(path, true, use_cache) {
                 Ok(result) => {
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(Path::new(path), &snapshots);
                     match export_markdown(&result.skills, output) {
                         Ok(_) => eprintln!("Markdown exported: {}", output),
-                        Err(e) => eprintln!("Error writing Markdown: {}", e),
+                        Err(e) => eprintln!("Error writing Markdown to '{}': {}. Check that the output path is writable.", output, e),
                     }
                 }
-                Err(e) => eprintln!("Error: {}", e),
+                Err(e) => eprintln!("Scan failed: {}. Check that the path exists, is readable, and contains SKILL.md files.", e),
             }
         }
         "export-svg" => {
@@ -903,12 +1094,14 @@ fn main() {
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(path, true, use_cache) {
                 Ok(result) => {
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(Path::new(path), &snapshots);
                     match export_svg(&result.skills, output) {
                         Ok(_) => eprintln!("SVG exported: {}", output),
-                        Err(e) => eprintln!("Error writing SVG: {}", e),
+                        Err(e) => eprintln!("Error writing SVG to '{}': {}. Check that the output path is writable.", output, e),
                     }
                 }
-                Err(e) => eprintln!("Error: {}", e),
+                Err(e) => eprintln!("Scan failed: {}. Check that the path exists, is readable, and contains SKILL.md files.", e),
             }
         }
         "ab-test" => {
@@ -925,7 +1118,7 @@ fn main() {
                 }
             }
             if let Err(e) = run_ab_test(path, iterations) {
-                eprintln!("A/B test error: {}", e);
+                eprintln!("A/B test error: {}. Check that the path exists and contains SKILL.md files.", e);
             }
         }
         "audit" => {
@@ -936,8 +1129,262 @@ fn main() {
             }
             let use_cache = !args.iter().any(|a| a == "--no-cache");
             match scan_skills(&args[2], true, use_cache) {
-                Ok(result) => print_audit_report(&result.skills),
-                Err(e) => eprintln!("Error: {}", e),
+                Ok(result) => {
+                    let path = Path::new(&args[2]);
+                    let snapshots: Vec<dream::SkillSnapshot> = result.skills.iter().map(dream::from_skill).collect();
+                    dream::record_session(path, &snapshots);
+                    let dream_kb = Some(dream::load_knowledge_base_from_path(path));
+                    print_audit_report(&result.skills, dream_kb.as_ref());
+
+                    // Outcome assessments
+                    let outcome_store = outcomes::load_outcomes(path);
+                    if !outcome_store.rubrics.is_empty() {
+                        println!("\n--- Outcome Assessments ---");
+                        for skill in &result.skills {
+                            if let Some(assessment) = outcomes::assess_skill(
+                                &skill.id,
+                                skill.metrics.content_length,
+                                skill.metrics.code_blocks,
+                                skill.metrics.step_count,
+                                skill.metrics.tech_term_count,
+                                &outcome_store,
+                            ) {
+                                outcomes::print_outcome_assessment(&assessment);
+                            }
+                        }
+                    }
+                }
+                Err(e) => eprintln!("Audit failed: {}. Check that the path exists and contains SKILL.md files.", e),
+            }
+        }
+        "dream" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let config = load_config(Path::new(path));
+            let kb = dream::run_dream_with_config(Path::new(path), Some(&config.dreaming));
+            dream::print_dream_report(&kb);
+        }
+        "dream-status" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let kb = dream::load_knowledge_base_from_path(Path::new(path));
+            dream::print_dream_report(&kb);
+        }
+        "dream-reset" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let p = Path::new(path);
+            let dream_path = dream::get_dream_path(p);
+            let history_path = dream::get_history_path(p);
+            let had_dream = dream_path.exists();
+            let had_history = history_path.exists();
+            if had_dream { let _ = fs::remove_file(&dream_path); }
+            if had_history { let _ = fs::remove_file(&history_path); }
+            if had_dream || had_history {
+                eprintln!("Dream state and history reset.");
+            } else {
+                eprintln!("No dream state or history found at '{}'. Nothing to reset.", path);
+            }
+        }
+        "dream-consolidate" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let config = load_config(Path::new(path));
+            let mut kb = dream::load_knowledge_base(Path::new(path));
+            let report = dream::consolidate_with_config(&mut kb, Some(&config.dreaming));
+            dream::save_knowledge_base(Path::new(path), &kb);
+            dream::print_consolidation_report(&report);
+            eprintln!("Knowledge base consolidated and saved.");
+        }
+        "dream-params" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let p = Path::new(path);
+            let config = load_config(p);
+            println!("\n=== Dreaming Configuration ===");
+            println!("  Config File: {}", p.join("medusa.toml").display());
+            println!("  Frequency: Every {} scan(s)", config.dreaming.frequency_scans);
+            println!("  Retention: {:.0}%", config.dreaming.retention_percent * 100.0);
+            println!("  Auto-Apply: {}", config.dreaming.auto_apply);
+            println!("  Max Insights: {}", config.dreaming.max_insights);
+            println!("\n  Tip: Edit medusa.toml to change these values.");
+        }
+        "dream-diary" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let has_output = args.iter().position(|a| a == "--output");
+            let diary = dream::generate_dream_diary(Path::new(path));
+            if let Some(pos) = has_output {
+                if let Some(output_path) = args.get(pos + 1) {
+                    let md = dream::export_dream_diary_md(&diary);
+                    match std::fs::write(output_path, md) {
+                        Ok(_) => eprintln!("Dream diary exported to {}", output_path),
+                        Err(e) => eprintln!("Error writing diary: {}", e),
+                    }
+                }
+            } else {
+                dream::print_dream_diary(&diary);
+            }
+        }
+        "procedural-list" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let mem = procedural::load_procedural(Path::new(path));
+            procedural::print_all_workflows(&mem);
+        }
+        "procedural-show" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa procedural-show <path> <skill_id>");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let skill_id = &args[3];
+            let mem = procedural::load_procedural(path);
+            let workflows = procedural::get_workflows_for_skill(&mem, skill_id);
+            if workflows.is_empty() {
+                println!("No procedural workflows associated with '{}'", skill_id);
+                println!("Run a scan to auto-detect workflows from skill step sequences.");
+            } else {
+                println!("\n=== Procedural Workflows for '{}' ===", skill_id);
+                for w in workflows {
+                    procedural::print_workflow(w);
+                }
+            }
+        }
+        "memory-export" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa memory-export <path> <output.json>");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let output = &args[3];
+            let dreaming = dream::load_knowledge_base_from_path(path);
+            let procedural = procedural::load_procedural(path);
+            let outcomes = outcomes::load_outcomes(path);
+            let bundle = SharedMemoryBundle {
+                source: format!("medusa@{}", std::env::current_exe().unwrap_or_default().display()),
+                exported_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                dreaming,
+                procedural,
+                outcomes,
+            };
+            match serde_json::to_string_pretty(&bundle) {
+                Ok(json) => match std::fs::write(output, &json) {
+                    Ok(_) => eprintln!("Memory bundle exported to {} ({} KB)", output, json.len() / 1024),
+                    Err(e) => eprintln!("Error writing bundle to '{}': {}. Check that the output path is writable.", output, e),
+                },
+                Err(e) => eprintln!("Error serializing bundle: {}. This may indicate corrupted memory state.", e),
+            }
+        }
+        "memory-import" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa memory-import <path> <input.json> [--source <name>]");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let input = &args[3];
+            let source = args.iter().position(|a| a == "--source")
+                .and_then(|p| args.get(p + 1))
+                .map(|s| s.clone())
+                .unwrap_or_else(|| "shared".to_string());
+
+            match std::fs::read_to_string(input) {
+                Ok(json) => match serde_json::from_str::<SharedMemoryBundle>(&json) {
+                    Ok(bundle) => {
+                        // Merge dreaming
+                        let mut local_kb = dream::load_knowledge_base(path);
+                        let before_dream = local_kb.insights.len();
+                        for insight in &bundle.dreaming.insights {
+                            let mut merged = insight.clone();
+                            merged.metadata.insert("source".to_string(), source.clone());
+                            if !local_kb.insights.iter().any(|i| i.id == merged.id) {
+                                local_kb.insights.push(merged);
+                            }
+                        }
+                        local_kb.total_patterns_found = local_kb.insights.len();
+                        dream::save_knowledge_base(path, &local_kb);
+
+                        // Merge procedural
+                        let mut local_proc = procedural::load_procedural(path);
+                        let before_proc = local_proc.workflows.len();
+                        for w in &bundle.procedural.workflows {
+                            if !local_proc.workflows.iter().any(|existing| existing.name == w.name) {
+                                local_proc.workflows.push(w.clone());
+                            }
+                        }
+                        procedural::save_procedural(path, &local_proc);
+
+                        // Merge outcomes
+                        let mut local_out = outcomes::load_outcomes(path);
+                        let before_out = local_out.rubrics.len();
+                        for (id, rubric) in &bundle.outcomes.rubrics {
+                            if !local_out.rubrics.contains_key(id) {
+                                local_out.rubrics.insert(id.clone(), rubric.clone());
+                            }
+                        }
+                        outcomes::save_outcomes(path, &local_out);
+
+                        eprintln!("Memory imported from '{}' (source: {})", input, source);
+                        eprintln!("  Dream insights: {} → {} ({} new)", before_dream, local_kb.insights.len(), local_kb.insights.len() - before_dream);
+                        eprintln!("  Workflows: {} → {} ({} new)", before_proc, local_proc.workflows.len(), local_proc.workflows.len() - before_proc);
+                        eprintln!("  Rubrics: {} → {} ({} new)", before_out, local_out.rubrics.len(), local_out.rubrics.len() - before_out);
+                    }
+                    Err(e) => eprintln!("Error parsing bundle '{}': {}. The file may be corrupted or from an incompatible version.", input, e),
+                },
+                Err(e) => eprintln!("Error reading bundle file '{}': {}. Check that the file exists and is readable.", input, e),
+            }
+        }
+        "outcome-add" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa outcome-add <path> <skill_id>");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let skill_id = &args[3];
+            let rubric = outcomes::get_default_rubric(skill_id);
+            outcomes::add_rubric(path, rubric);
+            eprintln!("Outcome rubric added for skill '{}'", skill_id);
+        }
+        "outcome-list" => {
+            let path = if args.len() >= 3 { &args[2] } else { "." };
+            let store = outcomes::load_outcomes(Path::new(path));
+            outcomes::print_rubric_list(&store);
+        }
+        "outcome-remove" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa outcome-remove <path> <skill_id>");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let skill_id = &args[3];
+            if outcomes::remove_rubric(path, skill_id) {
+                eprintln!("Rubric removed for '{}'", skill_id);
+            } else {
+                eprintln!("No rubric found for '{}'", skill_id);
+            }
+        }
+        "learning-path" => {
+            if args.len() < 4 {
+                eprintln!("Usage: medusa learning-path <path> <skill_id>");
+                return;
+            }
+            let path = Path::new(&args[2]);
+            let skill_id = &args[3];
+            let kb = dream::load_knowledge_base_from_path(path);
+            let learning = dream::get_learning_path_for_skill(skill_id, &kb);
+            dream::print_learning_path(skill_id, &learning);
+            println!("\nTip: Run 'medusa audit <path>' for full metrics and outcome assessment.");
+        }
+        "orchestrate" => {
+            if args.len() < 3 {
+                eprintln!("Error: Missing path argument");
+                eprintln!("Usage: medusa orchestrate <path> [--sequential] [--no-cache]");
+                return;
+            }
+            let path = &args[2];
+            let sequential = args.iter().any(|a| a == "--sequential");
+            let use_cache = !args.iter().any(|a| a == "--no-cache");
+            match scan_skills(path, !sequential, use_cache) {
+                Ok(result) => {
+                    let audits = agents::run_orchestrated_audit_all(&result.skills, &result.contents);
+                    for audit in &audits {
+                        agents::print_orchestrated_audit(audit);
+                    }
+                }
+                Err(e) => eprintln!("Orchestrated audit failed: {}. Check that the path exists and contains SKILL.md files.", e),
             }
         }
         "update" => {
@@ -952,23 +1399,23 @@ fn main() {
             };
             
             match std::process::Command::new("git")
-                .args(["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
+                .args(&["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     eprintln!("✅ Pull successful, rebuilding...");
                     match std::process::Command::new("cargo")
-                        .args(["build", "--release"])
+                        .args(&["build", "--release"])
                         .current_dir(repo_dir)
                         .status()
                     {
                         Ok(status) if status.success() => eprintln!("✅ Medusa updated to latest version!"),
-                        Ok(_) => eprintln!("❌ Build failed"),
-                        Err(e) => eprintln!("❌ Build error: {}", e),
+                        Ok(_) => eprintln!("❌ Build failed. Run 'cargo build --release' manually to see detailed errors."),
+                        Err(e) => eprintln!("❌ Build error: {}. Ensure Rust (cargo) is installed and in your PATH.", e),
                     }
                 }
-                Ok(_) => eprintln!("❌ Git pull failed"),
-                Err(e) => eprintln!("❌ Git error: {}", e),
+                Ok(_) => eprintln!("❌ Git pull failed. Check your network connection or run 'git pull' manually."),
+                Err(e) => eprintln!("❌ Git error: {}. Ensure git is installed and the repository exists.", e),
             }
         }
         _ => {

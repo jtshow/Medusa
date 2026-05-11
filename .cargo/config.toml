@@ -1,0 +1,7 @@
+[build]
+rustflags = ["-C", "target-cpu=native", "-C", "opt-level=3"]
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+strip = true
