@@ -1,4 +1,5 @@
-# Medusa Skill Framework (MSF) v0.12
+# Medusa Skill Framework (MSF) v0.12.1
+[![medusa.jpg](https://i.postimg.cc/k5v9H1qt/medusa.jpg)](https://postimg.cc/p9rghB92)
 
 Ultra-fast skill scanner with **audit-based ranking**, automatic promotion, and 9-tier leveling system.
 
@@ -466,8 +467,8 @@ MIT License (or your choice)
 ## Version History
 
 - **v0.12** (Current): Multi-agent orchestration, dream diary, configurable dreaming, procedural memory, cross-agent memory sharing + all Phase 1 features
-- **v0.11**: 9-tier leveling system (Godlike → Poor), rank promotion system (pre-rename)
-- **v0.5.0**: Rank promotion system (pre-rename)
+- **v0.11**: 9-tier leveling system (Godlike → Poor), rank promotion system
+- **v0.5.0**: Rank promotion system
 - **v0.4.0**: CLI improvements, A/B test framework
 - **v0.3.0**: Fusion detection, HTML visualization
 - **v0.2.0**: Parallel scanning with Rayon
