@@ -436,7 +436,7 @@ After installation, verify it works:
 
 **Expected output:**
 ```
-Medusa Skill Framework (MSF) v0.12.0
+Medusa Skill Framework (MSF) v0.12.1
 ```
 
 ### Test Scan

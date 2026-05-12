@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::fs;
-use chrono;
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,7 +242,7 @@ pub fn run_dream_with_config(path: &Path, config: Option<&super::DreamingConfig>
 
         // Collect gaps from the most recent session
         let latest_gaps: Vec<String> = appearances.last()
-            .and_then(|(_, _, g)| Some(g.clone()))
+            .map(|(_, _, g)| g.clone())
             .unwrap_or_default();
 
         // Check for recurring gaps
@@ -442,9 +441,7 @@ pub fn consolidate_with_config(kb: &mut DreamKnowledgeBase, config: Option<&supe
         let mut base = kb.insights[i].clone();
         used[i] = true;
 
-        for j in (i + 1)..kb.insights.len() {
-            if used[j] { continue; }
-            let other = &kb.insights[j];
+        for (j, other) in kb.insights.iter().enumerate().skip(i + 1) {
 
             let same_type = base.insight_type == other.insight_type;
             let same_skill = base.skill_id == other.skill_id;
@@ -944,7 +941,7 @@ pub fn export_dream_diary_md(diary: &DreamDiary) -> String {
         for (ts, exp) in &entry.timeline {
             md.push_str(&format!("| {} | {:.1} |\n", ts, exp));
         }
-        md.push_str("\n");
+        md.push('\n');
 
         // Gap evolution
         let gap_snapshots: Vec<&(String, Vec<String>)> = entry.gaps_over_time.iter().collect();
@@ -962,35 +959,51 @@ pub fn export_dream_diary_md(diary: &DreamDiary) -> String {
                     md.push_str(&format!("- **Resolved** ({}): {}\n", gap_snapshots[i].0, gone_gaps.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
                 }
             }
-            md.push_str("\n");
+            md.push('\n');
         }
     }
 
     let ps = &diary.pattern_summary;
     if !ps.recurring_gaps.is_empty() {
         md.push_str("## Recurring Gaps\n\n");
-        for g in &ps.recurring_gaps { md.push_str(&format!("- {}\n", g)); }
-        md.push_str("\n");
+for g in &ps.recurring_gaps { md.push_str(&format!("- {}\n", g)); }
+        md.push('\n');
+    }
+    if !ps.resolved_gaps.is_empty() {
+        for g in &ps.resolved_gaps { md.push_str(&format!("- ✓ {}\n", g)); }
+        md.push('\n');
+    }
+    if !ps.improvements.is_empty() {
+        for g in &ps.improvements { md.push_str(&format!("- ↑ {}\n", g)); }
+        md.push('\n');
+    }
+    if !ps.declines.is_empty() {
+        for g in &ps.declines { md.push_str(&format!("- ↓ {}\n", g)); }
+        md.push('\n');
+    }
+    if !ps.new_skills.is_empty() {
+        for g in &ps.new_skills { md.push_str(&format!("- ✦ {}\n", g)); }
+        md.push('\n');
     }
     if !ps.resolved_gaps.is_empty() {
         md.push_str("## Resolved Gaps\n\n");
         for g in &ps.resolved_gaps { md.push_str(&format!("- ✓ {}\n", g)); }
-        md.push_str("\n");
+        md.push('\n');
     }
     if !ps.improvements.is_empty() {
         md.push_str("## Improvements\n\n");
         for g in &ps.improvements { md.push_str(&format!("- ↑ {}\n", g)); }
-        md.push_str("\n");
+        md.push('\n');
     }
     if !ps.declines.is_empty() {
         md.push_str("## Declines\n\n");
         for g in &ps.declines { md.push_str(&format!("- ↓ {}\n", g)); }
-        md.push_str("\n");
+        md.push('\n');
     }
     if !ps.new_skills.is_empty() {
         md.push_str("## New Skills\n\n");
         for g in &ps.new_skills { md.push_str(&format!("- ✦ {}\n", g)); }
-        md.push_str("\n");
+        md.push('\n');
     }
 
     md
@@ -1070,5 +1083,263 @@ pub fn print_dream_report(kb: &DreamKnowledgeBase) {
         for insight in stable.iter().take(3) {
             println!("    - {}", insight.description);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SkillMetrics;
+    use crate::SkillContext;
+
+    fn sample_history() -> Vec<SessionRecord> {
+        vec![
+            SessionRecord {
+                timestamp: "2026-01-01 10:00:00".to_string(),
+                skills: vec![
+                    SkillSnapshot { id: "skill-a".to_string(), experience: 30.0, level: "Common".to_string(), gaps: vec!["needs steps".to_string()] },
+                    SkillSnapshot { id: "skill-b".to_string(), experience: 50.0, level: "Epic".to_string(), gaps: vec![] },
+                ],
+                total_skills: 2,
+                avg_experience: 40.0,
+            },
+            SessionRecord {
+                timestamp: "2026-01-02 10:00:00".to_string(),
+                skills: vec![
+                    SkillSnapshot { id: "skill-a".to_string(), experience: 45.0, level: "Mythic".to_string(), gaps: vec!["needs steps".to_string()] },
+                    SkillSnapshot { id: "skill-b".to_string(), experience: 55.0, level: "Epic".to_string(), gaps: vec![] },
+                ],
+                total_skills: 2,
+                avg_experience: 50.0,
+            },
+            SessionRecord {
+                timestamp: "2026-01-03 10:00:00".to_string(),
+                skills: vec![
+                    SkillSnapshot { id: "skill-a".to_string(), experience: 60.0, level: "Epic".to_string(), gaps: vec![] },
+                    SkillSnapshot { id: "skill-b".to_string(), experience: 40.0, level: "Mythic".to_string(), gaps: vec!["missing examples".to_string()] },
+                    SkillSnapshot { id: "skill-c".to_string(), experience: 10.0, level: "Poor".to_string(), gaps: vec!["too short".to_string()] },
+                ],
+                total_skills: 3,
+                avg_experience: 36.67,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_dream_knowledge_base_new() {
+        let kb = DreamKnowledgeBase::new();
+        assert!(kb.insights.is_empty());
+        assert!(kb.last_dream_time.is_none());
+        assert_eq!(kb.total_sessions_analyzed, 0);
+        assert_eq!(kb.total_patterns_found, 0);
+    }
+
+    #[test]
+    fn test_from_skill() {
+        let skill = crate::Skill {
+            id: "test-skill".to_string(),
+            label: "Test".to_string(),
+            description: "desc".to_string(),
+            experience: 50.0,
+            level: "Epic".to_string(),
+            confidence: 0.8,
+            metrics: SkillMetrics { content_length: 100, code_blocks: 2, step_count: 5, tech_term_count: 5, complexity_score: 50.0, value_score: 60.0 },
+            context: SkillContext::default(),
+        };
+        let snapshot = from_skill(&skill);
+        assert_eq!(snapshot.id, "test-skill");
+        assert_eq!(snapshot.experience, 50.0);
+        assert_eq!(snapshot.level, "Epic");
+    }
+
+    #[test]
+    fn test_collect_all_skill_ids() {
+        let history = sample_history();
+        let ids = collect_all_skill_ids(&history);
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&"skill-a".to_string()));
+        assert!(ids.contains(&"skill-b".to_string()));
+        assert!(ids.contains(&"skill-c".to_string()));
+    }
+
+    #[test]
+    fn test_get_skill_appearances() {
+        let history = sample_history();
+        let appearances = get_skill_appearances(&history, "skill-a");
+        assert_eq!(appearances.len(), 3);
+        assert_eq!(appearances[0].1, 30.0);
+        assert_eq!(appearances[2].1, 60.0);
+    }
+
+    #[test]
+    fn test_get_skill_appearances_not_found() {
+        let history = sample_history();
+        let appearances = get_skill_appearances(&history, "nonexistent");
+        assert!(appearances.is_empty());
+    }
+
+    #[test]
+    fn test_count_gap_frequency() {
+        let history = sample_history();
+        let appearances = get_skill_appearances(&history, "skill-a");
+        let freq = count_gap_frequency(&appearances);
+        assert_eq!(freq.get("needs steps"), Some(&2)); // appeared in 2 of 3 sessions
+    }
+
+    #[test]
+    fn test_get_all_historical_gaps() {
+        let history = sample_history();
+        let appearances = get_skill_appearances(&history, "skill-a");
+        let gaps = get_all_historical_gaps(&appearances);
+        // The last session has no gaps for skill-a, earlier sessions have "needs steps"
+        assert!(gaps.contains(&"needs steps".to_string()));
+    }
+
+    #[test]
+    fn test_consolidate_with_config() {
+        let mut kb = DreamKnowledgeBase::new();
+        kb.insights.push(DreamInsight {
+            id: "insight-1".to_string(),
+            insight_type: InsightType::Improvement,
+            skill_id: "skill-a".to_string(),
+            description: "Improving".to_string(),
+            severity: 0.8,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Improving,
+            metadata: HashMap::new(),
+        });
+        kb.insights.push(DreamInsight {
+            id: "insight-2".to_string(),
+            insight_type: InsightType::Stable,
+            skill_id: "skill-b".to_string(),
+            description: "Stable low severity".to_string(),
+            severity: 0.05,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Stable,
+            metadata: HashMap::new(),
+        });
+
+        // Use default config since DreamingConfig is private to main.rs
+        let report = consolidate_with_config(&mut kb, None);
+        assert_eq!(report.total_before, 2);
+        // The low-severity stable insight should be pruned
+        assert_eq!(report.low_severity_pruned, 1);
+        assert_eq!(kb.insights.len(), 1);
+    }
+
+    #[test]
+    fn test_get_insights_for_skill() {
+        let mut kb = DreamKnowledgeBase::new();
+        kb.insights.push(DreamInsight {
+            id: "1".to_string(),
+            insight_type: InsightType::RecurringGap,
+            skill_id: "skill-a".to_string(),
+            description: "Gap in skill-a".to_string(),
+            severity: 0.5,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Stable,
+            metadata: HashMap::new(),
+        });
+        kb.insights.push(DreamInsight {
+            id: "2".to_string(),
+            insight_type: InsightType::Improvement,
+            skill_id: "skill-b".to_string(),
+            description: "Improvement in skill-b".to_string(),
+            severity: 0.3,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Improving,
+            metadata: HashMap::new(),
+        });
+
+        let insights = get_insights_for_skill(&kb, "skill-a");
+        assert_eq!(insights.len(), 1);
+        assert_eq!(insights[0].id, "1");
+    }
+
+    #[test]
+    fn test_get_cross_session_summary() {
+        let mut kb = DreamKnowledgeBase::new();
+        kb.insights.push(DreamInsight {
+            id: "1".to_string(),
+            insight_type: InsightType::RecurringGap,
+            skill_id: "skill-a".to_string(),
+            description: "Recurring gap".to_string(),
+            severity: 0.5,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Stable,
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert("gap".to_string(), "needs examples".to_string());
+                m
+            },
+        });
+
+        let summary = get_cross_session_summary(&kb, "skill-a");
+        assert!(!summary.is_empty());
+        assert!(summary[0].contains("Recurring"));
+    }
+
+    #[test]
+    fn test_learning_suggestions() {
+        let suggestions = get_builtin_suggestions();
+        assert!(!suggestions.is_empty());
+
+        let code_suggestions = get_suggestions_for_gap("needs more code examples");
+        assert!(!code_suggestions.is_empty());
+        assert!(code_suggestions.iter().any(|s| s.gap_pattern == "code examples"));
+
+        let no_suggestions = get_suggestions_for_gap("totally unrelated gap");
+        assert!(no_suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_insight_type_equality() {
+        assert_eq!(InsightType::Improvement, InsightType::Improvement);
+        assert_ne!(InsightType::Improvement, InsightType::Decline);
+    }
+
+    #[test]
+    fn test_trend_direction_equality() {
+        assert_eq!(TrendDirection::Improving, TrendDirection::Improving);
+        assert_ne!(TrendDirection::Improving, TrendDirection::Declining);
+    }
+
+    #[test]
+    fn test_print_functions_do_not_panic() {
+        let _insight = DreamInsight {
+            id: "test".to_string(),
+            insight_type: InsightType::Improvement,
+            skill_id: "skill-a".to_string(),
+            description: "Test".to_string(),
+            severity: 0.5,
+            first_detected: "2026-01-01".to_string(),
+            last_detected: "2026-01-03".to_string(),
+            occurrences: 3,
+            trend: TrendDirection::Improving,
+            metadata: HashMap::new(),
+        };
+        let report = ConsolidationReport {
+            total_before: 5,
+            total_after: 3,
+            merged_count: 1,
+            pruned_count: 1,
+            low_severity_pruned: 0,
+            duplicate_merged: 1,
+        };
+
+        print_consolidation_report(&report);
+
+        let kb = DreamKnowledgeBase::new();
+        print_dream_report(&kb);
     }
 }

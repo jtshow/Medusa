@@ -11,22 +11,23 @@ use std::fs;
 use std::time::Instant;
 use std::collections::HashMap;
 use walkdir::WalkDir;
-use serde_json;
 use regex::Regex;
 use lazy_static::lazy_static;
-use chrono;
-use fxhash;
 
 lazy_static! {
-    // Regex for YAML frontmatter.
-    static ref RE_NAME: Regex = Regex::new(r#"name:\s*"?([^"\s}]+)"?#?"#).unwrap();
-    static ref RE_DESC: Regex = Regex::new(r#"description:\s*"([^"]+)""#).unwrap();
-    
+    // Regex for YAML frontmatter fields.
+    // FIXED: (?m) makes ^ match each line
+    static ref RE_NAME: Regex = Regex::new(r"(?m)^name:\s*(.+)").unwrap();
+    static ref RE_ID: Regex = Regex::new(r"(?m)^id:\s*(.+)").unwrap();
+    static ref RE_DESC: Regex = Regex::new(r"(?m)^description:\s*(.+)").unwrap();
+
     // Regex for complexity analysis.
     static ref RE_CODE_BLOCK: Regex = Regex::new(r#"```[\s\S]*?```"#).unwrap();
-    static ref RE_STEPS: Regex = Regex::new(r#"^\s*(\d+\.|[-*])\s"#).unwrap();
+    // FIXED: added (?m) multiline flag so ^ matches start of each line
+    static ref RE_STEPS: Regex = Regex::new(r"(?m)^\s*(\d+\.|[-*])\s").unwrap();
+    // FIXED: added (?i) case-insensitive flag
     static ref RE_TECH_TERMS: Regex = Regex::new(
-        r#"(algorithm|implementation|architecture|framework|optimization|scalability|security|encryption|authentication|database|api|sdk|middleware)"#
+        r"(?i)(algorithm|implementation|architecture|framework|optimization|scalability|security|encryption|authentication|database|api|sdk|middleware)"
     ).unwrap();
 }
 
@@ -124,7 +125,7 @@ struct FusionMatch {
     match_type: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct MedusaConfig {
     #[serde(default = "default_complexity_weight")]
     complexity_weight: f64,
@@ -157,6 +158,18 @@ impl Default for DreamingConfig {
             retention_percent: default_dream_retention(),
             auto_apply: default_dream_auto_apply(),
             max_insights: default_dream_max_insights(),
+        }
+    }
+}
+
+impl Default for MedusaConfig {
+    fn default() -> Self {
+        MedusaConfig {
+            complexity_weight: 0.6,
+            value_weight: 0.3,
+            keyword_weight: 0.1,
+            tier_thresholds: HashMap::new(),
+            dreaming: DreamingConfig::default(),
         }
     }
 }
@@ -261,11 +274,13 @@ fn parse_field_regex(re: &Regex, fm: &str) -> Option<String> {
 fn parse_skill_md(content: &str, file_path: &Path, config: &MedusaConfig) -> Option<Skill> {
     let fm = extract_frontmatter_str(content)?;
 
-    let id = parse_field_regex(&RE_NAME, fm).unwrap_or_else(|| {
-        file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string()
-    });
+    let id = parse_field_regex(&RE_ID, fm)
+        .or_else(|| parse_field_regex(&RE_NAME, fm))
+        .unwrap_or_else(|| {
+            file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string()
+        });
 
-    let label = id.clone();
+    let label = parse_field_regex(&RE_NAME, fm).unwrap_or_else(|| id.clone());
     let description = parse_field_regex(&RE_DESC, fm).unwrap_or_default();
     
     // FULL audit-based analysis.
@@ -334,7 +349,7 @@ fn export_markdown(skills: &[Skill], output_path: &str) -> Result<(), Box<dyn st
             for gap in &skill.context.gaps {
                 md.push_str(&format!("- {}\n", gap));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
         md.push_str("---\n\n");
     }
@@ -391,7 +406,13 @@ fn load_config(path: &Path) -> MedusaConfig {
     if config_path.exists() {
         fs::read_to_string(&config_path)
             .ok()
-            .and_then(|s| toml::from_str(&s).ok())
+            .and_then(|s| {
+                let filtered: String = s.lines()
+                    .filter(|l| !l.trim_start().starts_with('#'))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                toml::from_str(&filtered).ok()
+            })
             .unwrap_or_default()
     } else {
         MedusaConfig::default()
@@ -424,8 +445,9 @@ fn calculate_experience(metrics: &SkillMetrics, description: &str, config: &Medu
             exp += score * config.keyword_weight;
         }
     }
-    
-    exp.min(100.0)
+    // Clamp to avoid floating point drift above 100
+    exp = exp.min(100.0);
+    (exp * 100.0).round() / 100.0
 }
 
 /// Build learning paths from skills
@@ -436,7 +458,7 @@ fn build_learning_paths(skills: &[Skill]) -> Vec<LearningPath> {
     let mut categories: HashMap<String, Vec<&Skill>> = HashMap::new();
     for skill in skills {
         let category = skill.id.split('-').next().unwrap_or("other").to_string();
-        categories.entry(category).or_insert_with(Vec::new).push(skill);
+        categories.entry(category).or_default().push(skill);
     }
     
     for (category, category_skills) in categories {
@@ -565,7 +587,7 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
             dream_summary: None,
             skill_outcomes: None,
             rust_used: true,
-            version: "0.12.0".to_string(),
+            version: "0.12.1".to_string(),
             scan_type: if parallel { "parallel" } else { "sequential" }.to_string(),
             contents: HashMap::new(),
         });
@@ -586,7 +608,7 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
         .max_depth(4)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().file_name().map_or(false, |n| n == "SKILL.md"))
+        .filter(|e| e.path().file_name().is_some_and(|n| n == "SKILL.md"))
         .collect();
 
     let mut contents: HashMap<String, String> = HashMap::new();
@@ -694,7 +716,7 @@ fn scan_skills(path: &str, parallel: bool, use_cache: bool) -> Result<ScanResult
         dream_summary,
         skill_outcomes,
         rust_used: true,
-        version: "0.12.0".to_string(),
+        version: "0.12.1".to_string(),
         scan_type: if parallel { "parallel" } else { "sequential" }.to_string(),
     })
 }
@@ -732,8 +754,8 @@ fn detect_fusion(skills: &[Skill]) -> Vec<FusionMatch> {
 
 /// String similarity using FxHash.
 fn string_similarity(s1: &str, s2: &str) -> f64 {
-    if s1 == s2 { return 1.0; }
     if s1.is_empty() || s2.is_empty() { return 0.0; }
+    if s1 == s2 { return 1.0; }
 
     let words1: Vec<&str> = s1.split_whitespace().collect();
     let words2: Vec<&str> = s2.split_whitespace().collect();
@@ -1277,8 +1299,7 @@ fn main() {
             let path = Path::new(&args[2]);
             let input = &args[3];
             let source = args.iter().position(|a| a == "--source")
-                .and_then(|p| args.get(p + 1))
-                .map(|s| s.clone())
+                .and_then(|p| args.get(p + 1)).cloned()
                 .unwrap_or_else(|| "shared".to_string());
 
             match std::fs::read_to_string(input) {
@@ -1399,13 +1420,13 @@ fn main() {
             };
             
             match std::process::Command::new("git")
-                .args(&["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
+                .args(["-C", repo_dir.to_str().unwrap_or("."), "pull", "https://github.com/jtshow/medusa.git"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     eprintln!("✅ Pull successful, rebuilding...");
                     match std::process::Command::new("cargo")
-                        .args(&["build", "--release"])
+                        .args(["build", "--release"])
                         .current_dir(repo_dir)
                         .status()
                     {
@@ -1426,3 +1447,864 @@ fn main() {
 }
 
 // TODO: Implement learning paths, configurable scoring, enhanced suggestions, more export formats
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a minimal MedusaConfig for testing.
+    fn test_config() -> MedusaConfig {
+        MedusaConfig {
+            complexity_weight: 0.6,
+            value_weight: 0.3,
+            keyword_weight: 0.1,
+            tier_thresholds: HashMap::new(),
+            dreaming: DreamingConfig::default(),
+        }
+    }
+
+    // ─── analyze_skill_complexity ────────────────────────────────────────────
+
+    #[test]
+    fn test_analyze_skill_complexity_empty_content() {
+        let metrics = analyze_skill_complexity("");
+        assert_eq!(metrics.content_length, 0);
+        assert_eq!(metrics.code_blocks, 0);
+        assert_eq!(metrics.step_count, 0);
+        assert_eq!(metrics.tech_term_count, 0);
+        assert_eq!(metrics.complexity_score, 0.0);
+        assert_eq!(metrics.value_score, 50.0); // base value with no bonuses
+    }
+
+    #[test]
+    fn test_analyze_skill_complexity_tech_terms() {
+        let content = "This skill covers algorithm design, implementation patterns, and database architecture.";
+        let metrics = analyze_skill_complexity(content);
+        // algorithm, implementation, database, architecture = 4 tech terms
+        assert_eq!(metrics.tech_term_count, 4);
+        assert!(!metrics.complexity_score.is_nan());
+        assert!(metrics.complexity_score > 0.0);
+    }
+
+    #[test]
+    fn test_analyze_skill_complexity_code_blocks() {
+        let content = "\
+Some intro text here.
+
+```python
+print('hello')
+```
+
+More text.
+
+```rust
+fn main() {}
+```
+
+```javascript
+console.log('hi');
+```
+
+End text.";
+        let metrics = analyze_skill_complexity(content);
+        assert_eq!(metrics.code_blocks, 3);
+        assert!(metrics.complexity_score >= 15.0); // 3 * 5 = 15 from code blocks alone
+    }
+
+// ─── step_count test ── content uses (?m) regex, steps are "1." "2." etc."
+    #[test]
+    fn test_analyze_skill_complexity_step_count() {
+        let content = "\
+1. First step
+2. Second step
+3. Third step
+4. Fourth step
+5. Fifth step
+6. Sixth step
+7. Seventh step
+8. Eighth step
+9. Ninth step
+10. Tenth step";
+        let metrics = analyze_skill_complexity(content);
+        assert_eq!(metrics.step_count, 10);
+        assert!(metrics.complexity_score >= 20.0); // 10*2 = 20 from steps alone
+    }
+
+    #[test]
+    fn test_analyze_skill_complexity_bonus_all_components() {
+        // Has code blocks, >5 steps, >3 tech terms, and >3000 chars for all bonuses
+        let content = "\
+Introduction to this comprehensive skill that covers everything you need.
+
+## Technical Overview
+
+This skill provides expertise in algorithm design, implementation, database architecture, framework usage, optimization strategies, and security best practices including encryption and authentication.
+
+## Implementation Steps
+
+1. Install all prerequisites and set up the development environment.
+2. Configure the database and connection strings.
+3. Write the main implementation code.
+4. Add unit tests for every function.
+5. Run integration tests in CI.
+6. Deploy to staging.
+7. Verify with smoke tests.
+8. Promote to production.
+9. Monitor with observability tools.
+10. Document everything.
+11. Review and iterate.
+
+```python
+import sys
+def main():
+    pass
+```
+
+```rust
+fn main() {}
+```
+
+```sql
+CREATE TABLE users (id INT);
+```
+
+Conclusion and further reading.";
+        let metrics = analyze_skill_complexity(content);
+        assert!(metrics.complexity_score >= 10.0); // should have the +10 bonus
+        assert!(metrics.complexity_score <= 100.0);
+    }
+
+    #[test]
+    fn test_analyze_skill_complexity_capped_at_100() {
+        // Massively over-specified content — score must cap at 100
+        let mut content = String::new();
+        for i in 0..200 {
+            content.push_str(&format!("{}. Very long step description with lots of text to fill space\n", i + 1));
+        }
+        for _ in 0..30 {
+            content.push_str("\n```python\nx = 1\n```\n");
+        }
+        // Add tons of tech terms
+        for _ in 0..50 {
+            content.push_str(" algorithm implementation architecture framework optimization");
+        }
+        let metrics = analyze_skill_complexity(&content);
+        assert!(metrics.complexity_score <= 100.0);
+    }
+
+    // ─── calculate_experience ────────────────────────────────────────────────
+
+    #[test]
+    fn test_calculate_experience_base() {
+        let metrics = SkillMetrics {
+            content_length: 0,
+            code_blocks: 0,
+            step_count: 0,
+            tech_term_count: 0,
+            complexity_score: 0.0,
+            value_score: 0.0,
+        };
+        let config = test_config();
+        let exp = calculate_experience(&metrics, "", &config);
+        assert_eq!(exp, 10.0); // base experience
+    }
+
+    #[test]
+    fn test_calculate_experience_with_keywords() {
+        let metrics = SkillMetrics {
+            content_length: 0,
+            code_blocks: 0,
+            step_count: 0,
+            tech_term_count: 0,
+            complexity_score: 0.0,
+            value_score: 0.0,
+        };
+        let config = test_config();
+        // "rust" keyword gives 5.0 * 0.1 = 0.5
+        let exp = calculate_experience(&metrics, "This skill uses rust programming", &config);
+        assert!(exp > 10.0);
+        assert!(exp < 11.0);
+    }
+
+    #[test]
+    fn test_calculate_experience_caps_at_100() {
+        let metrics = SkillMetrics {
+            content_length: 100000,
+            code_blocks: 100,
+            step_count: 100,
+            tech_term_count: 100,
+            complexity_score: 100.0,
+            value_score: 100.0,
+        };
+        let config = test_config();
+        let exp = calculate_experience(&metrics, "advanced expert senior rust python kubernetes aws machine learning", &config);
+        assert!(exp <= 100.0);
+    }
+
+    #[test]
+    fn test_calculate_experience_configurable_weights() {
+        let metrics = SkillMetrics {
+            content_length: 5000,
+            code_blocks: 10,
+            step_count: 15,
+            tech_term_count: 10,
+            complexity_score: 80.0,
+            value_score: 70.0,
+        };
+        let mut config = test_config();
+        config.complexity_weight = 1.0;
+        config.value_weight = 0.0;
+        config.keyword_weight = 0.0;
+        let exp = calculate_experience(&metrics, "test", &config);
+        // Should be 10 + 80.0 * 1.0 = 90.0
+        assert!((exp - 90.0).abs() < 0.01);
+    }
+
+// ─── get_level ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_get_level_godlike() {
+        assert_eq!(get_level(99.0), "Godlike");
+        assert_eq!(get_level(95.0), "Godlike");
+    }
+
+    #[test]
+    fn test_get_level_unique() {
+        assert_eq!(get_level(94.9), "Unique");
+        assert_eq!(get_level(90.0), "Unique");
+    }
+
+    #[test]
+    fn test_get_level_legendary() {
+        assert_eq!(get_level(89.9), "Legendary");
+        assert_eq!(get_level(85.0), "Legendary");
+    }
+
+    #[test]
+    fn test_get_level_mythic() {
+        assert_eq!(get_level(84.9), "Mythic");
+        assert_eq!(get_level(80.0), "Mythic");
+    }
+
+    #[test]
+    fn test_get_level_epic() {
+        assert_eq!(get_level(79.9), "Epic");
+        assert_eq!(get_level(75.0), "Epic");
+    }
+
+    #[test]
+    fn test_get_level_ultra_rare() {
+        assert_eq!(get_level(74.9), "Ultra Rare");
+        assert_eq!(get_level(65.0), "Ultra Rare");
+    }
+
+    #[test]
+    fn test_get_level_rare() {
+        assert_eq!(get_level(64.9), "Rare");
+        assert_eq!(get_level(55.0), "Rare");
+    }
+
+#[test]
+    fn test_get_level_uncommon() {
+        // 45 >= 45 → "Uncommon"; 25 >= 25 but 25 < 45 → "Common"
+        assert_eq!(get_level(54.9), "Uncommon");
+        assert_eq!(get_level(45.0), "Uncommon");
+        assert_eq!(get_level(25.0), "Common");
+    }
+
+    #[test]
+    fn test_get_level_common() {
+        assert_eq!(get_level(24.9), "Poor");
+        assert_eq!(get_level(0.0), "Poor");
+        assert_eq!(get_level(-1.0), "Poor");
+    }
+
+    #[test]
+    fn test_get_level_poor() {
+        // Below 25 should be Poor
+        assert_eq!(get_level(-1.0), "Poor");
+        assert_eq!(get_level(0.0), "Poor");
+        assert_eq!(get_level(24.9), "Poor");
+    }
+
+    #[test]
+    fn test_get_level_boundary_values() {
+        // Test exact boundaries
+        assert_eq!(get_level(95.0), "Godlike");
+        assert_eq!(get_level(90.0), "Unique");
+        assert_eq!(get_level(85.0), "Legendary");
+        assert_eq!(get_level(80.0), "Mythic");
+        assert_eq!(get_level(75.0), "Epic");
+        assert_eq!(get_level(65.0), "Ultra Rare");
+        assert_eq!(get_level(55.0), "Rare");
+        assert_eq!(get_level(45.0), "Uncommon");
+        assert_eq!(get_level(25.0), "Common");
+        assert_eq!(get_level(24.99), "Poor");
+        assert_eq!(get_level(-1.0), "Poor");
+    }
+
+// ─── calculate_confidence ────────────────────────────────────────────────
+
+    #[test]
+    fn test_calculate_confidence_above_100_chars() {
+        let metrics = SkillMetrics {
+            content_length: 150,
+            code_blocks: 0,
+            step_count: 0,
+            tech_term_count: 0,
+            complexity_score: 0.0,
+            value_score: 0.0,
+        };
+        let conf = calculate_confidence("desc", "label", &metrics);
+        // base 0.3 + 0.2 for >100 chars = 0.5 exactly
+        assert!((conf - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_calculate_confidence_maximum() {
+        let metrics = SkillMetrics {
+            content_length: 10000,
+            code_blocks: 50,
+            step_count: 100,
+            tech_term_count: 50,
+            complexity_score: 100.0,
+            value_score: 100.0,
+        };
+        let conf = calculate_confidence("a description", "a label", &metrics);
+        assert!(conf <= 1.0);
+    }
+
+#[test]
+    fn test_calculate_confidence_minimum() {
+        let metrics = SkillMetrics {
+            content_length: 0,
+            code_blocks: 0,
+            step_count: 0,
+            tech_term_count: 0,
+            complexity_score: 0.0,
+            value_score: 0.0,
+        };
+        let conf = calculate_confidence("desc", "label", &metrics);
+        // base 0.3 with no bonuses, clamped to min 0.0
+        assert!(conf >= 0.0);
+        assert!(conf <= 1.0);
+    }
+
+    // ─── string_similarity ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_string_similarity_identical() {
+        assert_eq!(string_similarity("hello world", "hello world"), 1.0);
+    }
+
+    #[test]
+    fn test_string_similarity_empty() {
+        assert_eq!(string_similarity("", "hello"), 0.0);
+        assert_eq!(string_similarity("hello", ""), 0.0);
+        assert_eq!(string_similarity("", ""), 0.0);
+    }
+
+    #[test]
+    fn test_string_similarity_partial_overlap() {
+        let sim = string_similarity("rust programming", "rust language");
+        // shared: "rust" → common=1, total=4, score = 2*1/4 = 0.5
+        assert!((sim - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_string_similarity_no_overlap() {
+        let sim = string_similarity("aaaa bbbb", "cccc dddd");
+        assert_eq!(sim, 0.0);
+    }
+
+    // ─── detect_fusion ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_detect_fusion_high_similarity() {
+        // Use near-identical labels & descriptions to ensure similarity > 0.5
+        let skills = vec![
+            Skill {
+                id: "skill-a".to_string(),
+                label: "rust programming language".to_string(),
+                description: "Learn rust programming language from scratch".to_string(),
+                experience: 50.0,
+                level: "Epic".to_string(),
+                confidence: 0.8,
+                metrics: SkillMetrics {
+                    content_length: 1000,
+                    code_blocks: 5,
+                    step_count: 10,
+                    tech_term_count: 10,
+                    complexity_score: 50.0,
+                    value_score: 60.0,
+                },
+                context: SkillContext::default(),
+            },
+            Skill {
+                id: "skill-b".to_string(),
+                label: "rust language".to_string(),
+                description: "The rust programming language guide".to_string(),
+                experience: 40.0,
+                level: "Epic".to_string(),
+                confidence: 0.7,
+                metrics: SkillMetrics {
+                    content_length: 800,
+                    code_blocks: 4,
+                    step_count: 8,
+                    tech_term_count: 8,
+                    complexity_score: 40.0,
+                    value_score: 50.0,
+                },
+                context: SkillContext::default(),
+            },
+        ];
+        let matches = detect_fusion(&skills);
+        assert!(!matches.is_empty());
+        assert!(matches[0].similarity > 0.5);
+    }
+
+    #[test]
+    fn test_detect_fusion_no_similarity() {
+        let skills = vec![
+            Skill {
+                id: "skill-a".to_string(),
+                label: "zzzzz aaaaa".to_string(),
+                description: "completely unrelated skill one".to_string(),
+                experience: 50.0,
+                level: "Epic".to_string(),
+                confidence: 0.8,
+                metrics: SkillMetrics {
+                    content_length: 1000,
+                    code_blocks: 5,
+                    step_count: 10,
+                    tech_term_count: 10,
+                    complexity_score: 50.0,
+                    value_score: 60.0,
+                },
+                context: SkillContext::default(),
+            },
+            Skill {
+                id: "skill-b".to_string(),
+                label: "qqqqq bbbbb".to_string(),
+                description: "completely unrelated skill two".to_string(),
+                experience: 40.0,
+                level: "Epic".to_string(),
+                confidence: 0.7,
+                metrics: SkillMetrics {
+                    content_length: 800,
+                    code_blocks: 4,
+                    step_count: 8,
+                    tech_term_count: 8,
+                    complexity_score: 40.0,
+                    value_score: 50.0,
+                },
+                context: SkillContext::default(),
+            },
+        ];
+        let matches = detect_fusion(&skills);
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_detect_fusion_truncated_to_20() {
+        // Create 25 skills that are all similar to each other
+        let base_labels: Vec<String> = (0..25).map(|i| format!("test skill number {}", i)).collect();
+        let skills: Vec<Skill> = base_labels.iter().enumerate().map(|(i, label)| Skill {
+            id: format!("skill-{}", i),
+            label: label.clone(),
+            description: "a shared description for fusion testing".to_string(),
+            experience: 50.0,
+            level: "Epic".to_string(),
+            confidence: 0.8,
+            metrics: SkillMetrics {
+                content_length: 1000,
+                code_blocks: 5,
+                step_count: 10,
+                tech_term_count: 10,
+                complexity_score: 50.0,
+                value_score: 60.0,
+            },
+            context: SkillContext::default(),
+        }).collect();
+        let matches = detect_fusion(&skills);
+        assert!(matches.len() <= 20);
+    }
+
+    // ─── build_learning_paths ────────────────────────────────────────────────
+
+    #[test]
+    fn test_build_learning_paths_single_category() {
+        let skills = vec![
+            Skill {
+                id: "rust-basics".to_string(),
+                label: "Rust Basics".to_string(),
+                description: "".to_string(),
+                experience: 30.0,
+                level: "Common".to_string(),
+                confidence: 0.7,
+                metrics: SkillMetrics {
+                    content_length: 500,
+                    code_blocks: 2,
+                    step_count: 3,
+                    tech_term_count: 5,
+                    complexity_score: 20.0,
+                    value_score: 30.0,
+                },
+                context: SkillContext::default(),
+            },
+            Skill {
+                id: "rust-advanced".to_string(),
+                label: "Rust Advanced".to_string(),
+                description: "".to_string(),
+                experience: 75.0,
+                level: "Epic".to_string(),
+                confidence: 0.9,
+                metrics: SkillMetrics {
+                    content_length: 2000,
+                    code_blocks: 10,
+                    step_count: 15,
+                    tech_term_count: 20,
+                    complexity_score: 80.0,
+                    value_score: 90.0,
+                },
+                context: SkillContext::default(),
+            },
+        ];
+        let paths = build_learning_paths(&skills);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].skills, vec!["rust-basics", "rust-advanced"]);
+    }
+
+    #[test]
+    fn test_build_learning_paths_single_skill_no_path() {
+        let skills = vec![Skill {
+            id: "lone-skill".to_string(),
+            label: "Lone Skill".to_string(),
+            description: "".to_string(),
+            experience: 50.0,
+            level: "Epic".to_string(),
+            confidence: 0.8,
+            metrics: SkillMetrics {
+                content_length: 500,
+                code_blocks: 2,
+                step_count: 3,
+                tech_term_count: 5,
+                complexity_score: 20.0,
+                value_score: 30.0,
+            },
+            context: SkillContext::default(),
+        }];
+        let paths = build_learning_paths(&skills);
+        assert!(paths.is_empty()); // Single skill → no path built
+    }
+
+    #[test]
+    fn test_build_learning_paths_sorted_by_experience() {
+        let skills = vec![
+            Skill {
+                id: "rust-a".to_string(),
+                label: "Rust A".to_string(),
+                description: "".to_string(),
+                experience: 80.0,
+                level: "Mythic".to_string(),
+                confidence: 0.9,
+                metrics: SkillMetrics {
+                    content_length: 1000,
+                    code_blocks: 5,
+                    step_count: 8,
+                    tech_term_count: 10,
+                    complexity_score: 60.0,
+                    value_score: 70.0,
+                },
+                context: SkillContext::default(),
+            },
+            Skill {
+                id: "rust-b".to_string(),
+                label: "Rust B".to_string(),
+                description: "".to_string(),
+                experience: 20.0,
+                level: "Common".to_string(),
+                confidence: 0.6,
+                metrics: SkillMetrics {
+                    content_length: 300,
+                    code_blocks: 1,
+                    step_count: 2,
+                    tech_term_count: 3,
+                    complexity_score: 10.0,
+                    value_score: 20.0,
+                },
+                context: SkillContext::default(),
+            },
+            Skill {
+                id: "rust-c".to_string(),
+                label: "Rust C".to_string(),
+                description: "".to_string(),
+                experience: 50.0,
+                level: "Epic".to_string(),
+                confidence: 0.8,
+                metrics: SkillMetrics {
+                    content_length: 600,
+                    code_blocks: 3,
+                    step_count: 5,
+                    tech_term_count: 7,
+                    complexity_score: 35.0,
+                    value_score: 45.0,
+                },
+                context: SkillContext::default(),
+            },
+        ];
+        let paths = build_learning_paths(&skills);
+        assert_eq!(paths.len(), 1);
+        // Should be sorted by experience: rust-b (20) → rust-c (50) → rust-a (80)
+        assert_eq!(paths[0].skills, vec!["rust-b", "rust-c", "rust-a"]);
+    }
+
+    // ─── parse_skill_md ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_skill_md_valid() {
+        let content = "\
+---
+id: my-skill
+name: My Skill
+description: A test skill
+---
+
+## Steps
+
+1. First step
+2. Second step
+3. Third step";
+        let config = test_config();
+        let skill = parse_skill_md(content, "test.md".as_ref(), &config);
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+        assert_eq!(skill.id, "my-skill");
+        assert_eq!(skill.label, "My Skill");
+        assert_eq!(skill.description, "A test skill");
+        assert_eq!(skill.metrics.step_count, 3);
+    }
+
+    #[test]
+    fn test_parse_skill_md_no_frontmatter() {
+        let content = "Just some text without front matter.";
+        let config = test_config();
+        let skill = parse_skill_md(content, "test.md".as_ref(), &config);
+        assert!(skill.is_none());
+    }
+
+    #[test]
+    fn test_parse_skill_md_missing_description() {
+        let content = "\
+---
+id: no-desc
+name: No Description
+---
+
+Some content here.";
+        let config = test_config();
+        let skill = parse_skill_md(content, "test.md".as_ref(), &config);
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+        assert_eq!(skill.description, "");
+    }
+
+    #[test]
+    fn test_parse_skill_md_fallback_id_from_filename() {
+        let content = "\
+---
+description: A skill without explicit id
+---
+
+Content.";
+        let config = test_config();
+        let skill = parse_skill_md(content, "fallback-file.md".as_ref(), &config);
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+        assert_eq!(skill.id, "fallback-file");
+    }
+
+    // ─── export_csv ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_export_csv() {
+        let skills = vec![Skill {
+            id: "csv-test".to_string(),
+            label: "CSV Test".to_string(),
+            description: "A test for CSV export".to_string(),
+            experience: 55.5,
+            level: "Epic".to_string(),
+            confidence: 0.75,
+            metrics: SkillMetrics {
+                content_length: 10000,
+                code_blocks: 8,
+                step_count: 15,
+                tech_term_count: 12,
+                complexity_score: 75.0,
+                value_score: 85.0,
+            },
+            context: SkillContext {
+                dependencies: vec![],
+                fusion_opportunities: vec![],
+                improvement_history: vec![],
+                gaps: vec![],
+            },
+        }];
+        let path = std::env::temp_dir().join("medusa_test_export.csv");
+        let result = export_csv(&skills, path.to_str().unwrap());
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("csv-test"));
+        assert!(content.contains("55.5"));
+        assert!(content.contains("Epic"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    // ─── export_markdown ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_export_markdown() {
+        let skills = vec![Skill {
+            id: "md-test".to_string(),
+            label: "Markdown Test".to_string(),
+            description: "A test for Markdown export".to_string(),
+            experience: 60.0,
+            level: "Epic".to_string(),
+            confidence: 0.85,
+            metrics: SkillMetrics {
+                content_length: 5000,
+                code_blocks: 10,
+                step_count: 20,
+                tech_term_count: 15,
+                complexity_score: 85.0,
+                value_score: 90.0,
+            },
+            context: SkillContext {
+                dependencies: vec![],
+                fusion_opportunities: vec![],
+                improvement_history: vec![],
+                gaps: vec!["Add more examples".to_string()],
+            },
+        }];
+        let path = std::env::temp_dir().join("medusa_test_export.md");
+        let result = export_markdown(&skills, path.to_str().unwrap());
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# Medusa Skill Report"));
+        assert!(content.contains("Markdown Test"));
+        assert!(content.contains("Add more examples"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    // ─── load_config ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_config_default() {
+        let temp_dir = std::env::temp_dir().join("medusa_config_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let config = load_config(&temp_dir);
+        assert_eq!(config.complexity_weight, 0.6);
+        assert_eq!(config.value_weight, 0.3);
+        assert_eq!(config.keyword_weight, 0.1);
+        // Clean up
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_load_config_from_file() {
+        let temp_dir = std::env::temp_dir().join("medusa_config_test_file");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let toml_content = r#"
+complexity_weight = 0.8
+value_weight = 0.15
+keyword_weight = 0.05
+
+[dreaming]
+frequency_scans = 3
+retention_percent = 0.9
+auto_apply = false
+max_insights = 100
+"#;
+        std::fs::write(temp_dir.join("medusa.toml"), toml_content).unwrap();
+        let config = load_config(&temp_dir);
+        assert!((config.complexity_weight - 0.8).abs() < f64::EPSILON);
+        assert!((config.value_weight - 0.15).abs() < f64::EPSILON);
+        assert!((config.keyword_weight - 0.05).abs() < f64::EPSILON);
+        assert_eq!(config.dreaming.frequency_scans, 3);
+        assert!((config.dreaming.retention_percent - 0.9).abs() < f64::EPSILON);
+        assert!(!config.dreaming.auto_apply);
+        assert_eq!(config.dreaming.max_insights, 100);
+        // Clean up
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    // ─── scan edge cases ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_nonexistent_path() {
+        let result = scan_skills("/nonexistent/path/12345", false, false);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.total, 0);
+        assert!(result.skills.is_empty());
+    }
+
+    #[test]
+    fn test_scan_empty_directory() {
+        let temp_dir = std::env::temp_dir().join("medusa_empty_scan_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = scan_skills(temp_dir.to_str().unwrap(), false, false);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.total, 0);
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    // ─── ScanResult serialization ────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_result_serialization() {
+        let result = ScanResult {
+            skills: vec![],
+            total: 0,
+            scan_time_ms: 42,
+            fusion_matches: vec![],
+            rust_used: true,
+            version: "0.12.1".to_string(),
+            scan_type: "parallel".to_string(),
+            learning_paths: vec![],
+            dream_summary: None,
+            skill_outcomes: None,
+            contents: HashMap::new(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"total\":0"));
+        assert!(json.contains("\"scan_time_ms\":42"));
+    }
+
+    // ─── Skill struct Default ────────────────────────────────────────────────
+
+    #[test]
+    fn test_skill_default_values() {
+        let skill = Skill {
+            id: "test".to_string(),
+            label: "Test".to_string(),
+            description: "Test skill".to_string(),
+            experience: 0.0,
+            level: get_level(0.0),
+            confidence: 0.0,
+            metrics: SkillMetrics {
+                content_length: 0,
+                code_blocks: 0,
+                step_count: 0,
+                tech_term_count: 0,
+                complexity_score: 0.0,
+                value_score: 0.0,
+            },
+            context: SkillContext::default(),
+        };
+        assert_eq!(skill.level, "Poor");
+        assert!(skill.context.dependencies.is_empty());
+        assert!(skill.context.gaps.is_empty());
+    }
+}

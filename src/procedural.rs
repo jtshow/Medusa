@@ -197,3 +197,142 @@ pub fn print_all_workflows(mem: &ProceduralMemory) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_numbered_step() {
+        assert_eq!(extract_numbered_step("1. First step"), Some("First step".to_string()));
+        assert_eq!(extract_numbered_step("12) Deep step"), Some("Deep step".to_string()));
+        assert_eq!(extract_numbered_step("No step here"), None);
+        assert_eq!(extract_numbered_step("just text"), None);
+    }
+
+    #[test]
+    fn test_extract_bullet_step() {
+        assert_eq!(extract_bullet_step("- Bullet item"), Some("Bullet item".to_string()));
+        assert_eq!(extract_bullet_step("* Another bullet"), Some("Another bullet".to_string()));
+        assert_eq!(extract_bullet_step("Not a bullet"), None);
+        assert_eq!(extract_bullet_step("-"), None);
+    }
+
+    #[test]
+    fn test_categorize_step() {
+        assert_eq!(categorize_step("Install the package"), "Setup");
+        assert_eq!(categorize_step("Run the tests"), "Execution");
+        assert_eq!(categorize_step("Deploy to production"), "Execution");
+        assert_eq!(categorize_step("Write the code"), "Implementation");
+        assert_eq!(categorize_step("Learn about Rust"), "Learning");
+        assert_eq!(categorize_step("Document the API"), "Documentation");
+        assert_eq!(categorize_step("Something random"), "General");
+    }
+
+    #[test]
+    fn test_is_workflow_candidate_minimum_steps() {
+        let content = "1. Step one\n2. Step two\n3. Step three";
+        let steps = super::is_workflow_candidate(content);
+        assert_eq!(steps.len(), 3);
+    }
+
+    #[test]
+    fn test_is_workflow_candidate_insufficient_steps() {
+        let content = "1. Only one step\n2. And another";
+        let steps = super::is_workflow_candidate(content);
+        assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn test_is_workflow_candidate_skips_code_blocks() {
+        let content = "\
+1. First step
+
+```python
+for i in range(10):
+    print(i)
+```
+
+2. Second step
+3. Third step";
+        let steps = super::is_workflow_candidate(content);
+        assert_eq!(steps.len(), 3);
+    }
+
+    #[test]
+    fn test_procedural_workflow_creation() {
+        let wf = ProceduralWorkflow {
+            name: "Test Workflow".to_string(),
+            category: "Setup".to_string(),
+            steps: vec![
+                WorkflowStep { order: 1, description: "Install".to_string(), category: "Setup".to_string() },
+                WorkflowStep { order: 2, description: "Configure".to_string(), category: "Setup".to_string() },
+                WorkflowStep { order: 3, description: "Verify".to_string(), category: "Verification".to_string() },
+            ],
+            source_skills: vec!["test-skill".to_string()],
+            usage_count: 1,
+            created: "2026-01-01".to_string(),
+            last_used: "2026-01-01".to_string(),
+        };
+        assert_eq!(wf.steps.len(), 3);
+        assert_eq!(wf.category, "Setup");
+    }
+
+    #[test]
+    fn test_print_workflow_does_not_panic() {
+        let wf = ProceduralWorkflow {
+            name: "Test Workflow".to_string(),
+            category: "Setup".to_string(),
+            steps: vec![
+                WorkflowStep { order: 1, description: "Step 1".to_string(), category: "Setup".to_string() },
+            ],
+            source_skills: vec!["skill-a".to_string()],
+            usage_count: 5,
+            created: "2026-01-01".to_string(),
+            last_used: "2026-01-05".to_string(),
+        };
+        print_workflow(&wf);
+    }
+
+    #[test]
+    fn test_get_workflows_for_skill() {
+        let mem = ProceduralMemory {
+            workflows: vec![
+                ProceduralWorkflow {
+                    name: "WF-A".to_string(),
+                    category: "Setup".to_string(),
+                    steps: vec![],
+                    source_skills: vec!["skill-a".to_string(), "skill-b".to_string()],
+                    usage_count: 1,
+                    created: "2026-01-01".to_string(),
+                    last_used: "2026-01-01".to_string(),
+                },
+                ProceduralWorkflow {
+                    name: "WF-B".to_string(),
+                    category: "Execution".to_string(),
+                    steps: vec![],
+                    source_skills: vec!["skill-c".to_string()],
+                    usage_count: 1,
+                    created: "2026-01-01".to_string(),
+                    last_used: "2026-01-01".to_string(),
+                },
+            ],
+        };
+        let result = get_workflows_for_skill(&mem, "skill-a");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "WF-A");
+
+        let result = get_workflows_for_skill(&mem, "skill-c");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "WF-B");
+
+        let result = get_workflows_for_skill(&mem, "skill-d");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_print_all_workflows_empty() {
+        let mem = ProceduralMemory::default();
+        print_all_workflows(&mem);
+    }
+}

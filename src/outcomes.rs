@@ -283,3 +283,161 @@ pub fn get_default_rubric(skill_id: &str) -> OutcomeRubric {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_store() -> OutcomeStore {
+        let mut store = OutcomeStore::default();
+        store.rubrics.insert("test-skill".to_string(), OutcomeRubric {
+            skill_id: "test-skill".to_string(),
+            criteria: vec![
+                OutcomeCriterion {
+                    name: "Content".to_string(),
+                    description: "Content length".to_string(),
+                    good_threshold: 1000.0,
+                    needs_improvement_threshold: 500.0,
+                    metric_field: "content_length".to_string(),
+                },
+                OutcomeCriterion {
+                    name: "Code".to_string(),
+                    description: "Code blocks".to_string(),
+                    good_threshold: 5.0,
+                    needs_improvement_threshold: 2.0,
+                    metric_field: "code_blocks".to_string(),
+                },
+            ],
+            levels: HashMap::new(),
+        });
+        store
+    }
+
+    #[test]
+    fn test_assess_skill_good() {
+        let store = test_store();
+        let assessment = assess_skill("test-skill", 2000, 10, 15, 20, &store);
+        assert!(assessment.is_some());
+        let a = assessment.unwrap();
+        assert_eq!(a.skill_id, "test-skill");
+        assert_eq!(a.criterion_results.len(), 2);
+        // Both should be Good
+        assert_eq!(a.criterion_results[0].status, CriterionStatus::Good);
+        assert_eq!(a.criterion_results[1].status, CriterionStatus::Good);
+        assert!((a.score - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_assess_skill_needs_improvement() {
+        let store = test_store();
+        let assessment = assess_skill("test-skill", 700, 3, 5, 8, &store);
+        assert!(assessment.is_some());
+        let a = assessment.unwrap();
+        // Content: 700 < 1000 good but >= 500 needs_improvement → NeedsImprovement (0.5)
+        // Code: 3 >= 2 needs_improvement but < 5 good → NeedsImprovement (0.5)
+        assert_eq!(a.criterion_results[0].status, CriterionStatus::NeedsImprovement);
+        assert_eq!(a.criterion_results[1].status, CriterionStatus::NeedsImprovement);
+        assert!((a.score - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_assess_skill_poor() {
+        let store = test_store();
+        let assessment = assess_skill("test-skill", 100, 0, 1, 0, &store);
+        assert!(assessment.is_some());
+        let a = assessment.unwrap();
+        assert_eq!(a.criterion_results[0].status, CriterionStatus::Poor);
+        assert_eq!(a.criterion_results[1].status, CriterionStatus::Poor);
+        assert!((a.score - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_assess_skill_no_rubric() {
+        let store = OutcomeStore::default();
+        let assessment = assess_skill("unknown-skill", 1000, 5, 10, 10, &store);
+        assert!(assessment.is_none());
+    }
+
+    #[test]
+    fn test_assess_skill_mixed_results() {
+        let store = test_store();
+        let assessment = assess_skill("test-skill", 1500, 1, 8, 12, &store);
+        assert!(assessment.is_some());
+        let a = assessment.unwrap();
+        // Content: 1500 >= 1000 → Good (1.0)
+        // Code: 1 < 2 → Poor (0.0)
+        assert_eq!(a.criterion_results[0].status, CriterionStatus::Good);
+        assert_eq!(a.criterion_results[1].status, CriterionStatus::Poor);
+        // Average: (1.0 + 0.0) / 2 = 0.5 → 50.0
+        assert!((a.score - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_add_and_remove_rubric() {
+        let temp_dir = std::env::temp_dir().join("medusa_outcomes_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let rubric = OutcomeRubric {
+            skill_id: "test-skill".to_string(),
+            criteria: vec![OutcomeCriterion {
+                name: "Test".to_string(),
+                description: "Test criterion".to_string(),
+                good_threshold: 10.0,
+                needs_improvement_threshold: 5.0,
+                metric_field: "content_length".to_string(),
+            }],
+            levels: HashMap::new(),
+        };
+
+        add_rubric(&temp_dir, rubric);
+        let store = load_outcomes(&temp_dir);
+        assert!(store.rubrics.contains_key("test-skill"));
+
+        let removed = remove_rubric(&temp_dir, "test-skill");
+        assert!(removed);
+        let store = load_outcomes(&temp_dir);
+        assert!(!store.rubrics.contains_key("test-skill"));
+
+        let removed_again = remove_rubric(&temp_dir, "nonexistent");
+        assert!(!removed_again);
+
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_get_default_rubric() {
+        let rubric = get_default_rubric("my-skill");
+        assert_eq!(rubric.skill_id, "my-skill");
+        assert_eq!(rubric.criteria.len(), 4);
+        // Check metric fields
+        let fields: Vec<&str> = rubric.criteria.iter().map(|c| c.metric_field.as_str()).collect();
+        assert!(fields.contains(&"content_length"));
+        assert!(fields.contains(&"code_blocks"));
+        assert!(fields.contains(&"step_count"));
+        assert!(fields.contains(&"tech_term_count"));
+    }
+
+    #[test]
+    fn test_get_metric_value() {
+        assert_eq!(get_metric_value("content_length", 5000, 5, 10, 20), 5000.0);
+        assert_eq!(get_metric_value("code_blocks", 5000, 5, 10, 20), 5.0);
+        assert_eq!(get_metric_value("step_count", 5000, 5, 10, 20), 10.0);
+        assert_eq!(get_metric_value("tech_term_count", 5000, 5, 10, 20), 20.0);
+        assert_eq!(get_metric_value("complexity_score", 3000, 8, 12, 18), 110.0);
+        assert_eq!(get_metric_value("unknown_field", 1000, 5, 10, 20), 0.0);
+    }
+
+    #[test]
+    fn test_compute_complexity() {
+        // All metrics at zero
+        assert_eq!(compute_complexity(0, 0, 0, 0), 0.0);
+        // With bonus (code_blocks > 0, step_count > 5, tech_term_count > 3)
+        // 30 + 25 + 20 + 25 + 10 = 110
+        let c = compute_complexity(5000, 6, 10, 10);
+        assert_eq!(c, 110.0);
+        // Without bonus
+        // 30 + 10 + 6 + 5 = 51
+        let c = compute_complexity(5000, 2, 3, 2);
+        assert_eq!(c, 51.0);
+    }
+}
