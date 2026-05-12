@@ -1,5 +1,6 @@
 # Medusa Skill Framework (MSF) v0.12.1
 [![medusa.jpg](https://i.postimg.cc/k5v9H1qt/medusa.jpg)](https://postimg.cc/p9rghB92)
+[![W6EJw.jpg](https://i.postimg.cc/k4bCxgCN/W6EJw.jpg)](https://postimg.cc/R642m9Nq)
 
 Ultra-fast skill scanner with **audit-based ranking**, automatic promotion, and 9-tier leveling system.
 
